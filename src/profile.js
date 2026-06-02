@@ -2,6 +2,27 @@ import { fetchProfiles, verifyPin, saveProfileSession, getCurrentProfile, logout
 
 const $ = (sel) => document.querySelector(sel);
 
+// Helper for custom avatars
+function getAvatarHTML(profile, className) {
+  const name = profile.name.toLowerCase();
+  const avatarMap = {
+    'mery': '/avatars/mery.png',
+    'antony': '/avatars/antony.png',
+    'kekko': '/avatars/kekko.png'
+  };
+  
+  if (avatarMap[name]) {
+    return `<div class="${className}" style="background-color: ${profile.avatar_color}; background-image: url('${avatarMap[name]}'); background-size: cover; background-position: center;"></div>`;
+  }
+  
+  const innerClass = className === 'profile-avatar' ? 'profile-avatar-letter' : (className === 'pin-avatar' ? 'pin-avatar-letter' : '');
+  return `
+    <div class="${className}" style="background-color: ${profile.avatar_color}">
+      <span class="${innerClass}">${profile.name.charAt(0).toUpperCase()}</span>
+    </div>
+  `;
+}
+
 // ─── Profile Selection Screen ──────────────────────────
 
 /**
@@ -42,9 +63,7 @@ export async function renderProfileScreen() {
 
     grid.innerHTML = profiles.map(profile => `
       <button class="profile-card" data-id="${profile.id}" data-name="${profile.name}" data-color="${profile.avatar_color}">
-        <div class="profile-avatar" style="background-color: ${profile.avatar_color}">
-          <span class="profile-avatar-letter">${profile.name.charAt(0).toUpperCase()}</span>
-        </div>
+        ${getAvatarHTML(profile, 'profile-avatar')}
         <span class="profile-name">${profile.name}</span>
       </button>
     `).join('');
@@ -94,9 +113,7 @@ function showPinInput(profile) {
           <polyline points="15 18 9 12 15 6"/>
         </svg>
       </button>
-      <div class="pin-avatar" style="background-color: ${profile.avatar_color}">
-        <span class="pin-avatar-letter">${profile.name.charAt(0).toUpperCase()}</span>
-      </div>
+      ${getAvatarHTML(profile, 'pin-avatar')}
       <h3 class="pin-profile-name">${profile.name}</h3>
       <p class="pin-label">Inserisci il PIN</p>
       <div class="pin-dots" id="pin-dots">
@@ -306,9 +323,7 @@ export function initProfileBadge() {
   const badge = document.createElement('div');
   badge.className = 'profile-badge';
   badge.innerHTML = `
-    <div class="profile-badge-avatar" style="background-color: ${profile.avatar_color}">
-      <span>${profile.name.charAt(0).toUpperCase()}</span>
-    </div>
+    ${getAvatarHTML(profile, 'profile-badge-avatar')}
     <div class="profile-badge-menu hidden" id="profile-badge-menu">
       <div class="profile-badge-name">${profile.name}</div>
       <button class="profile-badge-logout" id="btn-logout">

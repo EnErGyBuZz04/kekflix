@@ -122,7 +122,7 @@ export function getEmbedUrl(type, tmdbId, season, episode, startTime) {
   } else {
     url = `${CONFIG.VIXSRC_BASE}/movie/${tmdbId}`;
   }
-  let full = `${url}?primaryColor=${primary}&secondaryColor=${secondary}&autoplay=true`;
+  let full = `${url}?lang=it&primaryColor=${primary}&secondaryColor=${secondary}&autoplay=true`;
   if (startTime && startTime > 0) {
     full += `&startAt=${Math.floor(startTime)}`;
   }

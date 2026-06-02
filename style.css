@@ -981,6 +981,8 @@ button {
   right: env(safe-area-inset-right, 0px);
   bottom: env(safe-area-inset-bottom, 0px);
   z-index: 2;
+  /* Safari fix: ensure iframe receives all touch/click events */
+  -webkit-transform: translateZ(0);
 }
 
 .cinema-loader {
@@ -2365,7 +2367,7 @@ body.tv-mode .navbar-nav a.tv-focused {
 .profile-avatar {
   width: 120px;
   height: 120px;
-  border-radius: 16px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2496,7 +2498,7 @@ body.tv-mode .navbar-nav a.tv-focused {
 .pin-avatar {
   width: 80px;
   height: 80px;
-  border-radius: 12px;
+  border-radius: 50%;
   margin: 0 auto 16px;
   display: flex;
   align-items: center;
@@ -2707,7 +2709,7 @@ body.tv-mode .navbar-nav a.tv-focused {
 .profile-badge-avatar {
   width: 34px;
   height: 34px;
-  border-radius: 6px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;

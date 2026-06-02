@@ -1282,45 +1282,68 @@ export async function openDetail(id, type = 'movie') {
 
     // Fetch and display watch progress for this content
     const progressProfile = getCurrentProfile();
+    let activeSeasonNum = null;
+    let activeEpisodeNum = 1;
+    let activeStartTime = 0;
+    let isMovieCompleted = false;
+
     if (progressProfile) {
-      getEpisodeProgress(progressProfile.id, id).then(progressData => {
-        const progressContainer = document.getElementById('modal-progress-bar');
-        if (!progressContainer || !progressData || progressData.length === 0) return;
+      try {
+        const progressData = await getEpisodeProgress(progressProfile.id, id);
+        if (progressData && progressData.length > 0) {
+          const movieProgress = progressData.find(p => !p.season && !p.episode);
+          if (movieProgress && type === 'movie') {
+            isMovieCompleted = movieProgress.completed;
+            const pct = movieProgress.duration_seconds > 0
+              ? Math.min(Math.round((movieProgress.progress_seconds / movieProgress.duration_seconds) * 100), 100)
+              : 0;
+            const remaining = movieProgress.duration_seconds > 0
+              ? Math.max(0, Math.round((movieProgress.duration_seconds - movieProgress.progress_seconds) / 60))
+              : 0;
+            const label = movieProgress.completed ? '✓ Visto' : `${remaining} min rimasti`;
 
-        // For movies: show single progress bar (season/episode are null)
-        // For TV: handled separately in loadEpisodes
-        const movieProgress = progressData.find(p => !p.season && !p.episode);
-        if (movieProgress && type === 'movie') {
-          const pct = movieProgress.duration_seconds > 0
-            ? Math.min(Math.round((movieProgress.progress_seconds / movieProgress.duration_seconds) * 100), 100)
-            : 0;
-          const remaining = movieProgress.duration_seconds > 0
-            ? Math.max(0, Math.round((movieProgress.duration_seconds - movieProgress.progress_seconds) / 60))
-            : 0;
-          const label = movieProgress.completed ? '✓ Visto' : `${remaining} min rimasti`;
+            setTimeout(() => {
+              const progressContainer = document.getElementById('modal-progress-bar');
+              if (progressContainer) {
+                progressContainer.innerHTML = `
+                  <div class="modal-watch-progress">
+                    <div class="modal-wp-bar">
+                      <div class="modal-wp-fill${movieProgress.completed ? ' modal-wp-completed' : ''}" style="width:${movieProgress.completed ? 100 : pct}%"></div>
+                    </div>
+                    <span class="modal-wp-label">${label}</span>
+                  </div>
+                `;
+              }
+            }, 0);
 
-          progressContainer.innerHTML = `
-            <div class="modal-watch-progress">
-              <div class="modal-wp-bar">
-                <div class="modal-wp-fill${movieProgress.completed ? ' modal-wp-completed' : ''}" style="width:${movieProgress.completed ? 100 : pct}%"></div>
-              </div>
-              <span class="modal-wp-label">${label}</span>
-            </div>
-          `;
+            if (!movieProgress.completed && movieProgress.progress_seconds > 30) {
+              activeStartTime = movieProgress.progress_seconds;
+            }
+          }
 
-          // Update play button text if not completed
-          if (!movieProgress.completed && movieProgress.progress_seconds > 30) {
-            const playBtn = document.getElementById('modal-play-btn');
-            if (playBtn) {
-              playBtn.innerHTML = `
-                <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-                Continua a guardare
-              `;
-              playBtn.dataset.startTime = movieProgress.progress_seconds;
+          if (type === 'tv') {
+            const tvProg = progressData.filter(p => p.season && p.episode);
+            if (tvProg.length > 0) {
+              // TV Progress is returned in PK order (season, episode ASC).
+              // We must sort by updated_at DESC (if available) or fallback to highest season/episode
+              tvProg.sort((a, b) => {
+                if (a.updated_at && b.updated_at) {
+                  return new Date(b.updated_at) - new Date(a.updated_at);
+                }
+                if (b.season !== a.season) return b.season - a.season;
+                return b.episode - a.episode;
+              });
+
+              const last = tvProg[0];
+              activeSeasonNum = last.season;
+              activeEpisodeNum = last.episode;
+              if (!last.completed && last.progress_seconds > 30) {
+                activeStartTime = last.progress_seconds;
+              }
             }
           }
         }
-      }).catch(() => {});
+      } catch (err) {}
     }
 
     // Trailer section
@@ -1351,13 +1374,14 @@ export async function openDetail(id, type = 'movie') {
     // Season/Episode selector for TV
     if (type === 'tv' && seasons.length > 0) {
       const filteredSeasons = seasons.filter(s => s.season_number > 0);
+      const targetSeason = activeSeasonNum || (filteredSeasons[0] ? filteredSeasons[0].season_number : 1);
       bodyHTML += `
         <div class="season-selector" id="season-selector">
           <div class="season-tabs" id="season-tabs">
             ${filteredSeasons
               .map(
-                (s, i) => `
-              <button class="season-tab ${i === 0 ? 'active' : ''}" 
+                (s) => `
+              <button class="season-tab ${s.season_number === targetSeason ? 'active' : ''}" 
                       data-season="${s.season_number}" 
                       data-tv-id="${id}">
                 Stagione ${s.season_number}
@@ -1404,15 +1428,16 @@ export async function openDetail(id, type = 'movie') {
     const _modalTitle = title;
     const _modalPoster = detail.poster_path;
     if (playBtn) {
+      if (activeStartTime > 0) {
+        playBtn.innerHTML = `<svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Continua a guardare`;
+      }
       playBtn.addEventListener('click', () => {
         if (type === 'tv') {
           const firstSeason = seasons.find(s => s.season_number > 0);
-          if (firstSeason) {
-            openPlayer('tv', id, firstSeason.season_number, 1, _modalTitle, _modalPoster);
-          }
+          const sNum = activeSeasonNum || (firstSeason ? firstSeason.season_number : 1);
+          openPlayer('tv', id, sNum, activeEpisodeNum, _modalTitle, _modalPoster, activeStartTime);
         } else {
-          const startTime = parseFloat(playBtn.dataset.startTime) || 0;
-          openPlayer('movie', id, undefined, undefined, _modalTitle, _modalPoster, startTime);
+          openPlayer('movie', id, undefined, undefined, _modalTitle, _modalPoster, activeStartTime);
         }
       });
     }
@@ -1445,8 +1470,9 @@ export async function openDetail(id, type = 'movie') {
     if (type === 'tv') {
       attachSeasonTabEvents(id);
       const firstSeason = seasons.find(s => s.season_number > 0);
-      if (firstSeason) {
-        loadEpisodes(id, firstSeason.season_number);
+      const targetSeason = activeSeasonNum || (firstSeason ? firstSeason.season_number : 1);
+      if (targetSeason) {
+        loadEpisodes(id, targetSeason);
       }
     }
 
@@ -1556,6 +1582,7 @@ async function loadEpisodes(tvId, seasonNumber) {
 let playerOverlay = null;
 let playerTrackingData = null; // { type, id, season, episode, title, posterPath, currentTime, duration }
 let playerMessageHandler = null;
+let playerAutoSaveInterval = null;
 
 export function openPlayer(type, id, season, episode, title, posterPath, startTime) {
   const url = getEmbedUrl(type, id, season, episode, startTime);
@@ -1573,6 +1600,14 @@ export function openPlayer(type, id, season, episode, title, posterPath, startTi
     title: title || '', posterPath: posterPath || '',
     currentTime: 0, duration: 0,
   };
+
+  // Auto-save every 30 seconds
+  if (playerAutoSaveInterval) clearInterval(playerAutoSaveInterval);
+  playerAutoSaveInterval = setInterval(() => {
+    if (playerTrackingData && playerTrackingData.currentTime > 0) {
+      savePlayerProgress(false);
+    }
+  }, 30000);
   // Auto-play state
   let _autoplayTriggered = false;
   let _autoplayInterval = null;
@@ -1695,7 +1730,9 @@ export function openPlayer(type, id, season, episode, title, posterPath, startTi
     <iframe
       src="${url}"
       allowfullscreen
-      allow="autoplay; encrypted-media"
+      webkitallowfullscreen
+      mozallowfullscreen
+      allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
       referrerpolicy="origin"
     ></iframe>
     <button class="cinema-close" tabindex="-1">✕</button>
@@ -1705,6 +1742,24 @@ export function openPlayer(type, id, season, episode, title, posterPath, startTi
   document.body.style.overflow = 'hidden';
   playerOverlay = overlay;
   playerOverlay._origOpen = origOpen;
+
+  // Safari fix: focus the iframe once loaded so it captures click/touch events
+  const iframe = overlay.querySelector('iframe');
+  if (iframe) {
+    iframe.addEventListener('load', () => {
+      // Hide loader
+      const loader = overlay.querySelector('.cinema-loader');
+      if (loader) loader.style.display = 'none';
+      // Focus iframe for Safari interaction
+      setTimeout(() => iframe.focus(), 100);
+    });
+    // Also focus on touch (Safari sometimes needs this)
+    overlay.addEventListener('touchstart', (e) => {
+      if (e.target === overlay) {
+        iframe.focus();
+      }
+    }, { passive: true });
+  }
 
   overlay.querySelector('.cinema-close').addEventListener('click', () => history.back());
 
@@ -1720,12 +1775,28 @@ export function openPlayer(type, id, season, episode, title, posterPath, startTi
         // Store the next episode function for autoplay
         _goToNextEp = () => {
           if (_autoplayInterval) clearInterval(_autoplayInterval);
-          // Mark current episode as completed
-          savePlayerProgress(true);
+          // Save progress without forcing completion (will use the 2-minute rule)
+          savePlayerProgress(false);
           playerTrackingData = null;
           openPlayer(type, id, season, currentEp + 1, title, posterPath);
         };
         nextBtn?.addEventListener('click', () => _goToNextEp());
+      } else if (currentEp === totalEps && infoBar) {
+        // Last episode of the season. Check if there's a next season.
+        fetchTVDetails(id).then(tvData => {
+          const nextSeasonNum = parseInt(season) + 1;
+          const hasNextSeason = tvData.seasons?.some(s => s.season_number === nextSeasonNum && s.episode_count > 0);
+          if (hasNextSeason) {
+            infoBar.style.display = '';
+            _goToNextEp = () => {
+              if (_autoplayInterval) clearInterval(_autoplayInterval);
+              savePlayerProgress(false);
+              playerTrackingData = null;
+              openPlayer(type, id, nextSeasonNum, 1, title, posterPath);
+            };
+            nextBtn?.addEventListener('click', () => _goToNextEp());
+          }
+        }).catch(() => {});
       }
     }).catch(() => {});
   }
@@ -1768,6 +1839,10 @@ export function closePlayer(goBack = true) {
   if (playerMessageHandler) {
     window.removeEventListener('message', playerMessageHandler);
     playerMessageHandler = null;
+  }
+  if (playerAutoSaveInterval) {
+    clearInterval(playerAutoSaveInterval);
+    playerAutoSaveInterval = null;
   }
   playerTrackingData = null;
 
