@@ -6,6 +6,7 @@ import {
   initModalEvents,
 } from './ui.js';
 import { renderProfileScreen, checkExistingSession, initProfileBadge } from './profile.js';
+import { initTvNavigation } from './tv-nav.js';
 
 // ─── App Init ─────────────────────────────────────────
 let appInitialized = false;
@@ -35,6 +36,7 @@ async function initApp() {
   initSearch();
   initModalEvents();
   initProfileBadge();
+  initTvNavigation();
 
   // Render homepage
   try {

@@ -2,6 +2,16 @@ import { fetchProfiles, verifyPin, saveProfileSession, getCurrentProfile, logout
 
 const $ = (sel) => document.querySelector(sel);
 
+// Escape strings injected in HTML templates
+function esc(str) {
+  return String(str ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 // Helper for custom avatars
 function getAvatarHTML(profile, className) {
   const name = profile.name.toLowerCase();
@@ -62,9 +72,9 @@ export async function renderProfileScreen() {
     }
 
     grid.innerHTML = profiles.map(profile => `
-      <button class="profile-card" data-id="${profile.id}" data-name="${profile.name}" data-color="${profile.avatar_color}">
+      <button class="profile-card" data-id="${profile.id}" data-name="${esc(profile.name)}" data-color="${esc(profile.avatar_color)}">
         ${getAvatarHTML(profile, 'profile-avatar')}
-        <span class="profile-name">${profile.name}</span>
+        <span class="profile-name">${esc(profile.name)}</span>
       </button>
     `).join('');
 
@@ -114,7 +124,7 @@ function showPinInput(profile) {
         </svg>
       </button>
       ${getAvatarHTML(profile, 'pin-avatar')}
-      <h3 class="pin-profile-name">${profile.name}</h3>
+      <h3 class="pin-profile-name">${esc(profile.name)}</h3>
       <p class="pin-label">Inserisci il PIN</p>
       <div class="pin-dots" id="pin-dots">
         <div class="pin-dot"></div>
@@ -316,6 +326,9 @@ export function initProfileBadge() {
   const navbar = $('nav.navbar');
   if (!navbar) return;
 
+  // Mount the badge inside the flex inner row so it lays out correctly
+  const mount = navbar.querySelector('.navbar-inner') || navbar;
+
   // Remove existing badge if any
   const existing = navbar.querySelector('.profile-badge');
   if (existing) existing.remove();
@@ -325,7 +338,7 @@ export function initProfileBadge() {
   badge.innerHTML = `
     ${getAvatarHTML(profile, 'profile-badge-avatar')}
     <div class="profile-badge-menu hidden" id="profile-badge-menu">
-      <div class="profile-badge-name">${profile.name}</div>
+      <div class="profile-badge-name">${esc(profile.name)}</div>
       <button class="profile-badge-logout" id="btn-logout">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
@@ -337,7 +350,7 @@ export function initProfileBadge() {
     </div>
   `;
 
-  navbar.appendChild(badge);
+  mount.appendChild(badge);
 
   // Toggle menu on click
   const avatarBtn = badge.querySelector('.profile-badge-avatar');

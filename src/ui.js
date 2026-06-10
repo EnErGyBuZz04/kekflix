@@ -1,4 +1,4 @@
-import { CONFIG, GENRES_MAP, TV_GENRES_MAP, FEATURED_GENRES, MOVIE_GENRE_LIST, TV_GENRE_LIST, COMPANY_LIST, TV_COMPANY_LIST } from './config.js';
+import { GENRES_MAP, TV_GENRES_MAP, FEATURED_GENRES, MOVIE_GENRE_LIST, TV_GENRE_LIST, COMPANY_LIST, TV_COMPANY_LIST } from './config.js';
 import {
   fetchTrending,
   fetchPopular,
@@ -19,6 +19,16 @@ import { saveWatchProgress, getWatchHistory, markWatchCompleted, getEpisodeProgr
 // ─── DOM References ───────────────────────────────────
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
+
+// Escape user/API strings injected in HTML templates (titles can contain " or <)
+function esc(str) {
+  return String(str ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
 
 const heroSection = $('#hero-section');
 const heroBackdrop = $('#hero-backdrop');
@@ -89,10 +99,10 @@ export async function renderHero(type = 'movie') {
       <div class="hero-meta">
         <span class="hero-rating">★ ${rating}</span>
         <span class="hero-year">${year}</span>
-        ${genreNames.map((g) => `<span class="hero-genre">${g}</span>`).join('')}
+        ${genreNames.map((g) => `<span class="hero-genre">${esc(g)}</span>`).join('')}
       </div>
-      <h1 class="hero-title">${title}</h1>
-      <p class="hero-overview">${overview}</p>
+      <h1 class="hero-title">${esc(title)}</h1>
+      <p class="hero-overview">${esc(overview)}</p>
       <div class="hero-actions">
         <button class="btn btn-play" id="hero-play">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
@@ -138,10 +148,10 @@ function createRowHTML(title, items, mediaType = 'movie') {
 
       return `
         <div class="card" data-id="${item.id}" data-type="${type}" tabindex="0">
-          <img class="card-poster" src="${poster}" alt="${name}" loading="lazy" />
+          <img class="card-poster" src="${poster}" alt="${esc(name)}" loading="lazy" />
           <div class="card-overlay">
             <div class="card-rating">${rating ? `★ ${rating}` : ''}</div>
-            <div class="card-title">${name}</div>
+            <div class="card-title">${esc(name)}</div>
             <div class="card-info">${year}</div>
           </div>
         </div>
@@ -151,7 +161,7 @@ function createRowHTML(title, items, mediaType = 'movie') {
 
   return `
     <div class="content-row fade-in">
-      <h2 class="row-title">${title}</h2>
+      <h2 class="row-title">${esc(title)}</h2>
       <div class="row-slider-wrap">
         <button class="row-arrow row-arrow-left" aria-label="Scorri a sinistra">‹</button>
         <div class="row-slider">${cards}</div>
@@ -198,10 +208,10 @@ export async function renderHomePage() {
   const [results, cwItems] = await Promise.all([dataPromises, cwPromise]);
 
   const labels = [
-    '🔥 Trending Oggi',
-    '🎬 Film Popolari',
-    '📺 Serie TV Popolari',
-    '⭐ I Più Votati',
+    'Trending Oggi',
+    'Film Popolari',
+    'Serie TV Popolari',
+    'I Più Votati',
     ...FEATURED_GENRES.slice(0, 3).map(g => GENRES_MAP[g]),
   ];
   const types = ['movie', 'movie', 'tv', 'movie', 'movie', 'movie', 'movie'];
@@ -231,8 +241,6 @@ export async function renderHomePage() {
   });
 
   contentRows.innerHTML = rows.join('');
-  attachCardEvents();
-  attachContinueWatchingEvents();
   attachRowArrows();
   observeFadeIns();
 }
@@ -254,10 +262,10 @@ function createContinueWatchingRow(items) {
     return `
       <div class="card cw-card" data-id="${item.tmdb_id}" data-type="${item.media_type}"
            data-season="${item.season || ''}" data-episode="${item.episode || ''}"
-           data-title="${item.title}" data-poster="${item.poster_path || ''}"
+           data-title="${esc(item.title)}" data-poster="${esc(item.poster_path || '')}"
            data-progress="${item.progress_seconds || 0}"
            tabindex="0">
-        <img class="card-poster" src="${poster}" alt="${item.title}" loading="lazy" />
+        <img class="card-poster" src="${poster}" alt="${esc(item.title)}" loading="lazy" />
         <div class="cw-overlay">
           <button class="cw-play-btn" aria-label="Riproduci">
             <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
@@ -267,7 +275,7 @@ function createContinueWatchingRow(items) {
           </button>
         </div>
         <div class="cw-info">
-          <div class="cw-title">${item.title}</div>
+          <div class="cw-title">${esc(item.title)}</div>
           ${subtitle ? `<div class="cw-subtitle">${subtitle}</div>` : ''}
           <div class="cw-time">${remaining} min rimasti</div>
         </div>
@@ -280,7 +288,7 @@ function createContinueWatchingRow(items) {
 
   return `
     <div class="content-row cw-row fade-in">
-      <h2 class="row-title">▶ Continua a guardare</h2>
+      <h2 class="row-title">Continua a guardare</h2>
       <div class="row-slider-wrap">
         <button class="row-arrow row-arrow-left" aria-label="Scorri a sinistra">‹</button>
         <div class="row-slider">${cards}</div>
@@ -290,62 +298,31 @@ function createContinueWatchingRow(items) {
   `;
 }
 
-function attachContinueWatchingEvents() {
-  const cwCards = document.querySelectorAll('.cw-card');
-  cwCards.forEach(card => {
-    // Card click → open detail modal
-    card.addEventListener('click', () => {
-      const type = card.dataset.type;
-      const id = parseInt(card.dataset.id);
-      openDetail(id, type);
-    });
+// Continue-watching actions handled by the delegated card handler below
 
-    // Play button → open player directly with resume
-    const playBtn = card.querySelector('.cw-play-btn');
-    if (playBtn) {
-      playBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const type = card.dataset.type;
-        const id = parseInt(card.dataset.id);
-        const season = card.dataset.season ? parseInt(card.dataset.season) : undefined;
-        const episode = card.dataset.episode ? parseInt(card.dataset.episode) : undefined;
-        const title = card.dataset.title;
-        const posterPath = card.dataset.poster;
-        const startTime = parseFloat(card.dataset.progress) || 0;
-        openPlayer(type, id, season, episode, title, posterPath, startTime);
-      });
+async function handleCwRemove(removeBtn, card) {
+  const profile = getCurrentProfile();
+  if (!profile) return;
+
+  const tmdbId = parseInt(removeBtn.dataset.tmdb);
+  const mediaType = removeBtn.dataset.type;
+  const season = removeBtn.dataset.season ? parseInt(removeBtn.dataset.season) : null;
+  const episode = removeBtn.dataset.episode ? parseInt(removeBtn.dataset.episode) : null;
+
+  // Animate removal
+  card.style.transition = 'opacity 0.3s, transform 0.3s';
+  card.style.opacity = '0';
+  card.style.transform = 'scale(0.9)';
+
+  await markWatchCompleted(profile.id, tmdbId, mediaType, season, episode);
+
+  setTimeout(() => {
+    card.remove();
+    const cwRow = document.querySelector('.cw-row');
+    if (cwRow && cwRow.querySelectorAll('.cw-card').length === 0) {
+      cwRow.remove();
     }
-
-    // Remove button → mark as completed (stays in DB for progress bars)
-    const removeBtn = card.querySelector('.cw-remove-btn');
-    if (removeBtn) {
-      removeBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const profile = getCurrentProfile();
-        if (!profile) return;
-
-        const tmdbId = parseInt(removeBtn.dataset.tmdb);
-        const mediaType = removeBtn.dataset.type;
-        const season = removeBtn.dataset.season ? parseInt(removeBtn.dataset.season) : null;
-        const episode = removeBtn.dataset.episode ? parseInt(removeBtn.dataset.episode) : null;
-
-        // Animate removal
-        card.style.transition = 'opacity 0.3s, transform 0.3s';
-        card.style.opacity = '0';
-        card.style.transform = 'scale(0.9)';
-
-        await markWatchCompleted(profile.id, tmdbId, mediaType, season, episode);
-
-        setTimeout(() => {
-          card.remove();
-          const cwRow = document.querySelector('.cw-row');
-          if (cwRow && cwRow.querySelectorAll('.cw-card').length === 0) {
-            cwRow.remove();
-          }
-        }, 300);
-      });
-    }
-  });
+  }, 300);
 }
 
 // ─── Filter Bar (Genres + Companies) ──────────────────
@@ -364,7 +341,7 @@ function createGenreFilterHTML(genreList, companyList, mediaType) {
 
   const currentYear = new Date().getFullYear();
   const newReleasesPill = mediaType === 'movie'
-    ? `<button class="genre-pill genre-pill-new" data-genre-id="new-releases" data-media-type="${mediaType}">🆕 Uscite ${currentYear}</button>`
+    ? `<button class="genre-pill genre-pill-new" data-genre-id="new-releases" data-media-type="${mediaType}">Novità ${currentYear}</button>`
     : '';
 
   return `
@@ -488,7 +465,6 @@ async function renderGenreGrid(genreId, mediaType) {
     }
 
     grid.innerHTML = renderCardGrid(items, mediaType);
-    attachCardEvents(grid);
 
     // "Load more" button + count
     const countEl = document.createElement('div');
@@ -547,7 +523,6 @@ async function renderGenreGrid(genreId, mediaType) {
         tempDiv.innerHTML = renderCardGrid(newItems, mediaType);
         const newCards = tempDiv.querySelectorAll('.card');
         newCards.forEach(card => grid.appendChild(card));
-        attachCardEvents(grid);
 
         nextPage += 3;
         const totalCount = seenIds.size;
@@ -592,10 +567,10 @@ function renderCardGrid(items, mediaType) {
 
       return `
         <div class="card" data-id="${item.id}" data-type="${mediaType}" tabindex="0">
-          <img class="card-poster" src="${poster}" alt="${name}" loading="lazy" />
+          <img class="card-poster" src="${poster}" alt="${esc(name)}" loading="lazy" />
           <div class="card-overlay">
             <div class="card-rating">${rating ? `★ ${rating}` : ''}</div>
-            <div class="card-title">${name}</div>
+            <div class="card-title">${esc(name)}</div>
             <div class="card-info">${year}</div>
           </div>
         </div>
@@ -688,7 +663,6 @@ async function renderCompanyGrid(companyIds, companyName, mediaType) {
     }
 
     grid.innerHTML = renderCardGrid(items, mediaType);
-    attachCardEvents(grid);
 
     // Footer with count
     const countEl = document.createElement('div');
@@ -743,7 +717,6 @@ async function renderCompanyGrid(companyIds, companyName, mediaType) {
           const tempDiv = document.createElement('div');
           tempDiv.innerHTML = renderCardGrid(newItems, mediaType);
           tempDiv.querySelectorAll('.card').forEach(card => grid.appendChild(card));
-          attachCardEvents(grid);
 
           nextPage += 5;
           countEl.querySelector('.genre-count').textContent = `${seenIds.size} titoli caricati`;
@@ -780,7 +753,7 @@ async function renderCompanyGrid(companyIds, companyName, mediaType) {
 // ─── New Releases Grid ────────────────────────────────
 async function renderNewReleasesGrid(mediaType) {
   const currentYear = new Date().getFullYear();
-  const title = `🆕 Uscite ${currentYear}`;
+  const title = `Novità ${currentYear}`;
 
   let target = $('#genre-rows-content');
   if (!target) {
@@ -860,7 +833,6 @@ async function renderNewReleasesGrid(mediaType) {
     }
 
     grid.innerHTML = renderCardGrid(items, mediaType);
-    attachCardEvents(grid);
 
     const countEl = document.createElement('div');
     countEl.className = 'genre-grid-footer';
@@ -913,7 +885,6 @@ async function renderNewReleasesGrid(mediaType) {
           const tempDiv = document.createElement('div');
           tempDiv.innerHTML = renderCardGrid(newItems, mediaType);
           tempDiv.querySelectorAll('.card').forEach(card => grid.appendChild(card));
-          attachCardEvents(grid);
 
           nextPage += 5;
           countEl.querySelector('.genre-count').textContent = `${seenIds.size} titoli caricati`;
@@ -990,37 +961,31 @@ async function renderMoviesAllRows() {
     });
   }
 
-  try {
-    const popular = await fetchPopular('movie');
-    const unique = dedup(popular);
-    if (unique.length) rows.push(createRowHTML('🎬 Popolari', unique));
-  } catch (e) { console.warn(e); }
+  // All rows fetched in parallel — the page renders in one network round-trip
+  const sources = [
+    { label: 'Popolari', fetch: () => fetchPopular('movie') },
+    { label: 'I Più Votati', fetch: () => fetchTopRated('movie') },
+    { label: 'Trending Questa Settimana', fetch: () => fetchTrending('movie', 'week') },
+    ...FEATURED_GENRES.map(genreId => ({
+      label: GENRES_MAP[genreId],
+      fetch: () => fetchByGenre(genreId, 'movie'),
+    })),
+  ];
 
-  try {
-    const topRated = await fetchTopRated('movie');
-    const unique = dedup(topRated);
-    if (unique.length) rows.push(createRowHTML('⭐ I Più Votati', unique));
-  } catch (e) { console.warn(e); }
-
-  try {
-    const trending = await fetchTrending('movie', 'week');
-    const unique = dedup(trending);
-    if (unique.length) rows.push(createRowHTML('🔥 Trending Questa Settimana', unique));
-  } catch (e) { console.warn(e); }
-
-  for (const genreId of FEATURED_GENRES) {
-    try {
-      const items = await fetchByGenre(genreId, 'movie');
-      const unique = dedup(items);
-      if (unique.length) rows.push(createRowHTML(GENRES_MAP[genreId], unique));
-    } catch (e) { console.warn(e); }
-  }
+  const results = await Promise.allSettled(sources.map(s => s.fetch()));
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled' && r.value?.length) {
+      const unique = dedup(r.value);
+      if (unique.length) rows.push(createRowHTML(sources[i].label, unique));
+    } else if (r.status === 'rejected') {
+      console.warn(r.reason);
+    }
+  });
 
   const target = $('#genre-rows-content');
   if (target) target.innerHTML = rows.join('');
   else contentRows.innerHTML = createGenreFilterHTML(MOVIE_GENRE_LIST, COMPANY_LIST, 'movie') + rows.join('');
 
-  attachCardEvents();
   attachRowArrows();
   observeFadeIns();
   // Re-attach filter events if needed
@@ -1067,40 +1032,31 @@ async function renderTVAllRows() {
     });
   }
 
-  try {
-    const popular = await fetchPopular('tv');
-    const unique = dedup(popular);
-    if (unique.length) rows.push(createRowHTML('📺 Popolari', unique, 'tv'));
-  } catch (e) { console.warn(e); }
+  // All rows fetched in parallel — the page renders in one network round-trip
+  const sources = [
+    { label: 'Popolari', fetch: () => fetchPopular('tv') },
+    { label: 'Le Più Votate', fetch: () => fetchTopRated('tv') },
+    { label: 'Trending', fetch: () => fetchTrending('tv', 'week') },
+    ...[18, 35, 10765, 80, 10759].map(genreId => ({
+      label: TV_GENRES_MAP[genreId] || GENRES_MAP[genreId] || 'Genere',
+      fetch: () => fetchByGenre(genreId, 'tv'),
+    })),
+  ];
 
-  try {
-    const topRated = await fetchTopRated('tv');
-    const unique = dedup(topRated);
-    if (unique.length) rows.push(createRowHTML('⭐ Le Più Votate', unique, 'tv'));
-  } catch (e) { console.warn(e); }
-
-  try {
-    const trending = await fetchTrending('tv', 'week');
-    const unique = dedup(trending);
-    if (unique.length) rows.push(createRowHTML('🔥 Trending', unique, 'tv'));
-  } catch (e) { console.warn(e); }
-
-  for (const genreId of [18, 35, 10765, 80, 10759]) {
-    try {
-      const items = await fetchByGenre(genreId, 'tv');
-      const unique = dedup(items);
-      const genreName = TV_GENRES_MAP[genreId] || GENRES_MAP[genreId] || 'Genere';
-      if (unique.length > 0) {
-        rows.push(createRowHTML(genreName, unique, 'tv'));
-      }
-    } catch (e) { console.warn(e); }
-  }
+  const results = await Promise.allSettled(sources.map(s => s.fetch()));
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled' && r.value?.length) {
+      const unique = dedup(r.value);
+      if (unique.length) rows.push(createRowHTML(sources[i].label, unique, 'tv'));
+    } else if (r.status === 'rejected') {
+      console.warn(r.reason);
+    }
+  });
 
   const target = $('#genre-rows-content');
   if (target) target.innerHTML = rows.join('');
   else contentRows.innerHTML = createGenreFilterHTML(TV_GENRE_LIST, TV_COMPANY_LIST, 'tv') + rows.join('');
 
-  attachCardEvents();
   attachRowArrows();
   observeFadeIns();
   if (!$('#genre-filter-bar')) attachGenreFilterEvents('tv');
@@ -1113,11 +1069,48 @@ export function initSearch() {
   const input = $('#search-input');
   if (!input) return;
 
+  const wrap = $('#nav-search-wrap');
+  const toggle = $('#search-toggle');
+  const navbar = $('#navbar');
+
+  const openNavSearch = () => {
+    wrap?.classList.add('open');
+    navbar?.classList.add('searching');
+    input.classList.add('active');
+    input.focus();
+  };
+
+  // Toggle button: open when collapsed, collapse when open & empty
+  toggle?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (wrap?.classList.contains('open')) {
+      if (!input.value.trim()) {
+        input.value = '';
+        closeSearch();
+        input.blur();
+      } else {
+        input.focus();
+      }
+    } else {
+      openNavSearch();
+    }
+  });
+
+  // Collapse the field on blur when there's nothing typed
+  input.addEventListener('blur', () => {
+    if (!input.value.trim()) {
+      wrap?.classList.remove('open');
+      navbar?.classList.remove('searching');
+      input.classList.remove('active');
+    }
+  });
+
   input.addEventListener('input', (e) => {
     clearTimeout(searchTimeout);
     const query = e.target.value.trim();
     if (query.length < 2) {
-      closeSearch();
+      searchOverlay.classList.remove('active');
+      searchGrid.innerHTML = '';
       return;
     }
     searchTimeout = setTimeout(() => performSearch(query), 400);
@@ -1145,7 +1138,7 @@ async function performSearch(query) {
       searchGrid.innerHTML = `
         <div class="no-results" style="grid-column:1/-1">
           <div class="no-results-icon">🔍</div>
-          <p class="no-results-text">Nessun risultato per "${query}"</p>
+          <p class="no-results-text">Nessun risultato per "${esc(query)}"</p>
         </div>
       `;
       return;
@@ -1161,11 +1154,11 @@ async function performSearch(query) {
         const rating = item.vote_average ? item.vote_average.toFixed(1) : '';
 
         return `
-          <div class="card" data-id="${item.id}" data-type="${type}">
-            <img class="card-poster" src="${poster}" alt="${name}" loading="lazy" />
+          <div class="card" data-id="${item.id}" data-type="${type}" tabindex="0">
+            <img class="card-poster" src="${poster}" alt="${esc(name)}" loading="lazy" />
             <div class="card-overlay">
               <div class="card-rating">${rating ? `★ ${rating}` : ''}</div>
-              <div class="card-title">${name}</div>
+              <div class="card-title">${esc(name)}</div>
               <div class="card-info">${year}${type === 'tv' ? ' • Serie TV' : ''}</div>
             </div>
           </div>
@@ -1173,7 +1166,6 @@ async function performSearch(query) {
       })
       .join('');
 
-    attachCardEvents(searchGrid);
   } catch (err) {
     console.error('Search error:', err);
     searchGrid.innerHTML = `
@@ -1188,6 +1180,10 @@ async function performSearch(query) {
 function closeSearch() {
   searchOverlay.classList.remove('active');
   searchGrid.innerHTML = '';
+  // Collapse the navbar search field
+  $('#nav-search-wrap')?.classList.remove('open');
+  $('#navbar')?.classList.remove('searching');
+  $('#search-input')?.classList.remove('active');
 }
 
 export function isSearchOpen() {
@@ -1247,7 +1243,7 @@ export async function openDetail(id, type = 'movie') {
     // Backdrop
     if (backdrop) {
       modalBackdropWrap.innerHTML = `
-        <img src="${backdrop}" alt="${title}" />
+        <img src="${backdrop}" alt="${esc(title)}" />
         <div class="modal-backdrop-gradient"></div>
         <div class="modal-backdrop-play">
           <button class="btn btn-play btn-play-lg" id="modal-play-btn" data-type="${type}" data-id="${id}">
@@ -1266,7 +1262,7 @@ export async function openDetail(id, type = 'movie') {
 
     // Body content
     let bodyHTML = `
-      <h2 class="modal-title">${title}</h2>
+      <h2 class="modal-title">${esc(title)}</h2>
       <div class="modal-meta">
         <span class="modal-rating">★ ${rating}</span>
         <span>${year}</span>
@@ -1274,11 +1270,30 @@ export async function openDetail(id, type = 'movie') {
         ${numberOfSeasons ? `<span>${numberOfSeasons} Stagion${numberOfSeasons > 1 ? 'i' : 'e'}</span>` : ''}
       </div>
       <div class="modal-genres">
-        ${genres.map((g) => `<span>${g}</span>`).join('')}
+        ${genres.map((g) => `<span>${esc(g)}</span>`).join('')}
       </div>
       <div id="modal-progress-bar"></div>
-      <p class="modal-overview">${overview}</p>
+      <p class="modal-overview">${esc(overview)}</p>
     `;
+
+    // Cast strip (credits are already in the detail payload)
+    const cast = (detail.credits?.cast || []).filter(c => c.profile_path).slice(0, 12);
+    if (cast.length > 0) {
+      bodyHTML += `
+        <div class="cast-section">
+          <h3 class="cast-section-title">Cast</h3>
+          <div class="cast-strip">
+            ${cast.map(c => `
+              <div class="cast-member">
+                <img class="cast-photo" src="${getPosterUrl(c.profile_path, 'profile')}" alt="${esc(c.name)}" loading="lazy" />
+                <div class="cast-name">${esc(c.name)}</div>
+                ${c.character ? `<div class="cast-character">${esc(c.character)}</div>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
 
     // Fetch and display watch progress for this content
     const progressProfile = getCurrentProfile();
@@ -1357,13 +1372,13 @@ export async function openDetail(id, type = 'movie') {
           </h3>
           <div class="trailer-player" id="trailer-player">
             <div class="trailer-placeholder" id="trailer-placeholder">
-              <img src="https://img.youtube.com/vi/${trailer.key}/hqdefault.jpg" alt="Trailer ${title}" />
+              <img src="https://img.youtube.com/vi/${trailer.key}/hqdefault.jpg" alt="Trailer ${esc(title)}" />
               <button class="trailer-play-overlay" id="trailer-play-overlay">
                 <svg viewBox="0 0 68 48" width="68" height="48"><path d="M66.52 7.74c-.78-2.93-2.49-5.41-5.42-6.19C55.79.13 34 0 34 0S12.21.13 6.9 1.55c-2.93.78-4.64 3.26-5.42 6.19C.06 13.05 0 24 0 24s.06 10.95 1.48 16.26c.78 2.93 2.49 5.41 5.42 6.19C12.21 47.87 34 48 34 48s21.79-.13 27.1-1.55c2.93-.78 4.64-3.26 5.42-6.19C67.94 34.95 68 24 68 24s-.06-10.95-1.48-16.26z" fill="#e50914"/><path d="M 45,24 27,14 27,34" fill="#fff"/></svg>
               </button>
             </div>
           </div>
-          ${trailer.name ? `<p class="trailer-name">${trailer.name}</p>` : ''}
+          ${trailer.name ? `<p class="trailer-name">${esc(trailer.name)}</p>` : ''}
         </div>
       `;
     }
@@ -1408,10 +1423,10 @@ export async function openDetail(id, type = 'movie') {
               const p = getPosterUrl(item.poster_path);
               const n = item.title || item.name || '';
               return `
-                <div class="card" data-id="${item.id}" data-type="${type}">
-                  <img class="card-poster" src="${p}" alt="${n}" loading="lazy" />
+                <div class="card" data-id="${item.id}" data-type="${type}" tabindex="0">
+                  <img class="card-poster" src="${p}" alt="${esc(n)}" loading="lazy" />
                   <div class="card-overlay">
-                    <div class="card-title">${n}</div>
+                    <div class="card-title">${esc(n)}</div>
                   </div>
                 </div>
               `;
@@ -1477,7 +1492,6 @@ export async function openDetail(id, type = 'movie') {
     }
 
     // Similar card events
-    attachCardEvents(modalBody);
 
   } catch (err) {
     console.error('Detail error:', err);
@@ -1552,8 +1566,8 @@ async function loadEpisodes(tvId, seasonNumber) {
         <div class="episode-card${prog ? ' episode-watched' : ''}" data-tv-id="${tvId}" data-season="${seasonNumber}" data-episode="${ep.episode_number}"
              data-progress="${prog ? prog.progress_seconds : 0}" data-completed="${prog ? prog.completed : false}">
           <div class="episode-number">Episodio ${ep.episode_number}</div>
-          <div class="episode-name">${ep.name || `Episodio ${ep.episode_number}`}</div>
-          ${ep.overview ? `<div class="episode-overview">${ep.overview}</div>` : ''}
+          <div class="episode-name">${esc(ep.name || `Episodio ${ep.episode_number}`)}</div>
+          ${ep.overview ? `<div class="episode-overview">${esc(ep.overview)}</div>` : ''}
           ${ep.runtime ? `<div class="episode-runtime">${ep.runtime} min</div>` : ''}
           ${progressHTML}
         </div>
@@ -1969,7 +1983,6 @@ async function refreshContinueWatching() {
         // Insert as first row
         contentRows.insertAdjacentHTML('afterbegin', newRowHTML);
       }
-      attachContinueWatchingEvents();
       attachRowArrows();
       observeFadeIns();
     } else if (existingRow) {
@@ -2006,33 +2019,61 @@ export function closeModal() {
   }, 300);
 }
 
-// Escape closes cinema player or modal
+// Escape closes (in priority order): cinema player → modal → search
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    if (playerOverlay) { e.preventDefault(); history.back(); }
-    else if (modalOverlay.classList.contains('active')) { closeModal(); }
+  if (e.key !== 'Escape') return;
+  if (playerOverlay) {
+    e.preventDefault();
+    history.back();
+  } else if (modalOverlay.classList.contains('active')) {
+    closeModal();
+  } else if (isSearchOpen()) {
+    closeSearch();
+    $('#search-input').value = '';
   }
 });
 
-// ─── Card Click Events ───────────────────────────────
-function attachCardEvents(container = document) {
-  const cards = container.querySelectorAll('.card[data-id]');
-  cards.forEach((card) => {
-    // Remove old listeners by cloning
-    const newCard = card.cloneNode(true);
-    card.parentNode.replaceChild(newCard, card);
+// TV remote "back" from tv-nav.js
+document.addEventListener('close-player', () => closePlayer());
 
-    newCard.addEventListener('click', () => {
-      const id = newCard.dataset.id;
-      const type = newCard.dataset.type || 'movie';
-      openDetail(parseInt(id), type);
-    });
+// ─── Card Click Events (delegated) ───────────────────
+// One listener handles every card on the page — including those added
+// later by "load more" / search / similar — without re-binding.
+document.addEventListener('click', (e) => {
+  if (!(e.target instanceof Element)) return;
 
-    newCard.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') newCard.click();
-    });
-  });
-}
+  // Continue-watching: play button → resume directly in player
+  const cwPlay = e.target.closest('.cw-play-btn');
+  if (cwPlay) {
+    const card = cwPlay.closest('.cw-card');
+    if (!card) return;
+    const season = card.dataset.season ? parseInt(card.dataset.season) : undefined;
+    const episode = card.dataset.episode ? parseInt(card.dataset.episode) : undefined;
+    const startTime = parseFloat(card.dataset.progress) || 0;
+    openPlayer(card.dataset.type, parseInt(card.dataset.id), season, episode, card.dataset.title, card.dataset.poster, startTime);
+    return;
+  }
+
+  // Continue-watching: remove button
+  const cwRemove = e.target.closest('.cw-remove-btn');
+  if (cwRemove) {
+    const card = cwRemove.closest('.cw-card');
+    if (card) handleCwRemove(cwRemove, card);
+    return;
+  }
+
+  // Any poster card → open detail modal
+  const card = e.target.closest('.card[data-id]');
+  if (card) {
+    openDetail(parseInt(card.dataset.id), card.dataset.type || 'movie');
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !(e.target instanceof Element)) return;
+  const card = e.target.closest('.card[data-id]');
+  if (card) card.click();
+});
 
 // ─── Row Horizontal Scroll Arrows ────────────────────
 function attachRowArrows() {
@@ -2146,19 +2187,10 @@ async function navigateTo(page) {
 }
 
 // ─── Modal Events ─────────────────────────────────────
+// Escape handling is centralized in the module-scope keydown listener above
 export function initModalEvents() {
   modalClose.addEventListener('click', closeModal);
   modalOverlay.addEventListener('click', (e) => {
     if (e.target === modalOverlay) closeModal();
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      if (modalOverlay.classList.contains('active')) {
-        closeModal();
-      } else if (isSearchOpen()) {
-        closeSearch();
-        $('#search-input').value = '';
-      }
-    }
   });
 }

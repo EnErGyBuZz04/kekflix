@@ -7,43 +7,47 @@
 
 /* ---------- 2. CSS Variables ---------- */
 :root {
-  /* Backgrounds */
-  --bg-primary: #141414;
-  --bg-secondary: #1a1a1a;
-  --bg-card: #181818;
-  --bg-hover: #252525;
+  /* Backgrounds — deep cinematic blacks with a cool undertone */
+  --bg-primary: #0b0b0f;
+  --bg-secondary: #131318;
+  --bg-card: #15151b;
+  --bg-hover: #1f1f27;
 
   /* Text */
   --text-primary: #ffffff;
-  --text-secondary: #b3b3b3;
-  --text-muted: #777777;
+  --text-secondary: #b8b8c2;
+  --text-muted: #7c7c88;
 
   /* Accent / Brand */
   --accent: #E50914;
-  --accent-hover: #f40612;
+  --accent-hover: #f6121d;
   --accent-dark: #8B0000;
+  --accent-glow: rgba(229, 9, 20, 0.35);
+  --gold: #ffd166;
 
   /* Gradients */
-  --gradient-hero: linear-gradient(to top, #141414 0%, transparent 50%);
-  --gradient-hero-side: linear-gradient(to right, #141414 20%, transparent 50%);
+  --gradient-hero: linear-gradient(to top, #0b0b0f 0%, rgba(11, 11, 15, 0.6) 45%, rgba(11, 11, 15, 0) 100%);
+  --gradient-hero-side: linear-gradient(to right, rgba(11, 11, 15, 0.9) 0%, rgba(11, 11, 15, 0.4) 35%, rgba(11, 11, 15, 0) 65%);
 
   /* Glass */
-  --glass-bg: rgba(20, 20, 20, 0.85);
+  --glass-bg: rgba(15, 15, 20, 0.72);
   --glass-border: rgba(255, 255, 255, 0.08);
 
   /* Shadows */
-  --shadow-card: 0 4px 20px rgba(0, 0, 0, 0.5);
-  --shadow-modal: 0 8px 40px rgba(0, 0, 0, 0.8);
+  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-card-hover: 0 22px 50px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.12);
+  --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.06);
 
   /* Radii */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 16px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
 
   /* Transitions */
-  --transition-fast: 150ms ease;
-  --transition-normal: 300ms ease;
-  --transition-slow: 500ms ease;
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* Layout */
   --navbar-height: 68px;
@@ -66,11 +70,17 @@ html {
 
 body {
   background-color: var(--bg-primary);
+  /* Subtle ambient glow — gives depth to the flat black */
+  background-image:
+    radial-gradient(1200px 500px at 80% -10%, rgba(229, 9, 20, 0.05), transparent 60%),
+    radial-gradient(900px 600px at 10% 0%, rgba(80, 80, 160, 0.05), transparent 55%);
+  background-attachment: fixed;
   color: var(--text-primary);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   min-height: 100vh;
   overflow-x: hidden;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
@@ -94,7 +104,7 @@ button {
 
 /* ---------- 4. Custom Scrollbar ---------- */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -102,12 +112,13 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 4px;
+  background: #2a2a33;
+  border-radius: 5px;
+  border: 2px solid var(--bg-primary);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #555;
+  background: #44444f;
 }
 
 /* ---------- 5. Navbar ---------- */
@@ -119,24 +130,53 @@ button {
   z-index: 1000;
   height: calc(var(--navbar-height) + env(safe-area-inset-top, 0px));
   padding-top: env(safe-area-inset-top, 0px);
-  background: rgba(20, 20, 20, 0.95);
-  border-bottom: 1px solid var(--glass-border);
+  background: transparent;
+  border-bottom: 1px solid transparent;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding-left: 4%;
   padding-right: 4%;
-  transition: background 0.3s ease;
+  transition: background 0.35s ease, border-color 0.35s ease, backdrop-filter 0.35s ease;
 }
 
+/* Top scrim for legibility — taller than the bar so the fade continues well
+   past the navbar's bottom edge instead of terminating there (which left a
+   perceived dark "line"/Mach band against the bright hero). */
+.navbar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 160px;
+  background: linear-gradient(to bottom, rgba(11, 11, 15, 0.82) 0%, rgba(11, 11, 15, 0.3) 38%, rgba(11, 11, 15, 0) 100%);
+  pointer-events: none;
+  z-index: -1;
+  transition: opacity 0.35s ease;
+}
+
+/* …that becomes frosted glass once you scroll */
 .navbar.scrolled {
-  background: rgba(10, 10, 10, 0.95);
+  background: var(--glass-bg);
+  border-bottom-color: var(--glass-border);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+}
+
+/* The soft scrim gives way to the glass panel on scroll */
+.navbar.scrolled::before {
+  opacity: 0;
 }
 
 .navbar-brand {
   font-family: 'Outfit', sans-serif;
   font-weight: 800;
   font-size: 1.8rem;
+  background: linear-gradient(180deg, #ff3b30 0%, var(--accent) 55%, #b00710 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   color: var(--accent);
   letter-spacing: 2px;
   text-transform: uppercase;
@@ -146,6 +186,7 @@ button {
   outline: none;
   border: none;
   -webkit-text-stroke: 0;
+  filter: drop-shadow(0 2px 10px rgba(229, 9, 20, 0.25));
 }
 
 .navbar-nav {
@@ -155,10 +196,37 @@ button {
 }
 
 .navbar-nav a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   color: var(--text-secondary);
   font-size: 0.9rem;
-  font-weight: 400;
+  font-weight: 500;
+  padding: 6px 2px;
   transition: color var(--transition-fast);
+}
+
+/* Icons are only shown in the mobile bottom bar */
+.nav-icon {
+  display: none;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+/* Animated accent underline */
+.navbar-nav a::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 0.3s var(--ease-out-expo);
 }
 
 .navbar-nav a:hover {
@@ -170,64 +238,93 @@ button {
   font-weight: 600;
 }
 
+.navbar-nav a.active::after {
+  transform: scaleX(1);
+}
+
 .nav-search {
   position: relative;
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .nav-search input {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   border: 1px solid transparent;
-  border-radius: 4px;
-  padding: 8px 36px 8px 12px;
+  border-radius: 999px;
+  padding: 9px 0;
   color: #ffffff;
   font-size: 0.9rem;
   width: 0;
+  min-width: 0;
   opacity: 0;
-  transition: width 0.4s ease, opacity 0.4s ease, border-color 0.3s ease;
+  transition: width 0.45s var(--ease-out-expo), padding 0.3s ease, opacity 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
   outline: none;
 }
 
 .nav-search input:focus,
-.nav-search input.active {
-  width: 240px;
+.nav-search input.active,
+.nav-search.open input {
+  width: 230px;
+  padding: 9px 16px;
   opacity: 1;
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.05);
 }
 
 .nav-search input::placeholder {
   color: var(--text-muted);
 }
 
+/* Search trigger is now a real, tappable button */
 .search-icon {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
   color: var(--text-secondary);
   cursor: pointer;
-  pointer-events: none;
+  transition: background 0.2s ease, color 0.2s ease;
   z-index: 2;
+}
+
+.search-icon:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
 }
 
 .navbar-inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   width: 100%;
-  gap: 24px;
+  gap: 28px;
+}
+
+/* Brand stays left; everything from the search on is pushed right */
+.navbar-brand {
+  flex-shrink: 0;
+}
+
+.navbar-inner .nav-search {
+  margin-left: auto;
 }
 
 /* ---------- 6. Hero Section ---------- */
 .hero {
   width: 100%;
-  height: 75vh;
-  min-height: 400px;
-  max-height: 700px;
+  height: 82vh;
+  min-height: 420px;
+  max-height: 820px;
   position: relative;
   overflow: hidden;
-  margin-top: var(--navbar-height);
+  margin-top: 0;
   display: flex;
   align-items: flex-end;
 }
@@ -237,8 +334,16 @@ button {
   inset: 0;
   background-size: cover;
   background-position: center top;
-  filter: brightness(0.7);
+  filter: brightness(0.72) saturate(1.05);
   z-index: 0;
+  /* Slow cinematic push-in */
+  animation: heroKenBurns 24s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+@keyframes heroKenBurns {
+  from { transform: scale(1); }
+  to { transform: scale(1.08); }
 }
 
 .hero::after {
@@ -265,7 +370,7 @@ button {
 .hero-gradient-side {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to right, rgba(20,20,20,0.8) 0%, transparent 40%);
+  background: linear-gradient(to right, rgba(11, 11, 15, 0.85) 0%, rgba(11, 11, 15, 0) 45%);
   z-index: 1;
   pointer-events: none;
 }
@@ -278,43 +383,71 @@ button {
 
 .hero-content {
   position: absolute;
-  bottom: 15%;
+  bottom: 14%;
   left: 4%;
   z-index: 2;
-  max-width: 600px;
+  max-width: 620px;
+}
+
+/* Staggered entrance for hero elements */
+.hero-content > * {
+  animation: heroRise 0.8s var(--ease-out-expo) both;
+}
+
+.hero-content > :nth-child(1) { animation-delay: 0.05s; }
+.hero-content > :nth-child(2) { animation-delay: 0.15s; }
+.hero-content > :nth-child(3) { animation-delay: 0.25s; }
+.hero-content > :nth-child(4) { animation-delay: 0.35s; }
+
+@keyframes heroRise {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .hero-title {
   font-family: 'Outfit', sans-serif;
-  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-size: clamp(2.2rem, 5.5vw, 4.2rem);
   font-weight: 800;
-  line-height: 1.1;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.6);
+  line-height: 1.05;
+  letter-spacing: -0.5px;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.7);
   margin-bottom: 4px;
 }
 
 .hero-meta {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
   margin-bottom: 16px;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  flex-wrap: wrap;
 }
 
 .hero-rating {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #ffd700;
-  font-weight: 600;
+  color: var(--gold);
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 209, 102, 0.3);
+  backdrop-filter: blur(6px);
 }
 
 .hero-year {
-  color: var(--text-secondary);
+  color: var(--text-primary);
+  font-weight: 600;
 }
 
 .hero-genre {
   color: var(--text-secondary);
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(6px);
 }
 
 .hero-overview {
@@ -344,20 +477,27 @@ button {
   font-weight: 600;
   font-size: 1rem;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: transform var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
   border: none;
   outline: none;
   font-family: inherit;
   text-decoration: none;
 }
 
+.btn:active {
+  transform: scale(0.97);
+}
+
 .btn-play {
   background: #ffffff;
-  color: #141414;
+  color: #0b0b0f;
+  box-shadow: 0 6px 24px rgba(255, 255, 255, 0.18);
 }
 
 .btn-play:hover {
-  background: #e0e0e0;
+  background: #e8e8e8;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 32px rgba(255, 255, 255, 0.25);
 }
 
 .btn-play svg,
@@ -367,12 +507,15 @@ button {
 }
 
 .btn-info {
-  background: rgba(109, 109, 110, 0.7);
+  background: rgba(255, 255, 255, 0.14);
   color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(8px);
 }
 
 .btn-info:hover {
-  background: rgba(109, 109, 110, 0.4);
+  background: rgba(255, 255, 255, 0.24);
+  transform: translateY(-1px);
 }
 
 .btn-accent {
@@ -412,10 +555,26 @@ button {
 }
 
 .content-row .row-title {
-  font-size: 1.4rem;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
   margin-bottom: 14px;
   color: var(--text-primary);
+}
+
+/* Accent tick before each row title */
+.content-row .row-title::before {
+  content: '';
+  width: 4px;
+  height: 1.15em;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-dark) 100%);
+  box-shadow: 0 0 12px var(--accent-glow);
+  flex-shrink: 0;
 }
 
 .row-slider {
@@ -442,18 +601,18 @@ button {
   top: 50%;
   transform: translateY(-50%);
   z-index: 10;
-  width: 40px;
-  height: 80%;
+  width: 44px;
+  height: 70%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(20, 20, 20, 0.7);
+  background: linear-gradient(to right, rgba(11, 11, 15, 0.85), rgba(11, 11, 15, 0.55));
   border: none;
   color: white;
   font-size: 2rem;
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--transition-normal);
+  transition: opacity var(--transition-normal), background var(--transition-fast);
 }
 
 .row-slider-wrap:hover .row-arrow {
@@ -461,7 +620,8 @@ button {
 }
 
 .row-arrow:hover {
-  background: rgba(20, 20, 20, 0.9);
+  background: rgba(11, 11, 15, 0.95);
+  color: var(--accent);
 }
 
 .row-arrow-left {
@@ -490,7 +650,12 @@ button {
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  padding-bottom: 4px;
+  padding: 5px 2px 7px;
+  scroll-snap-type: x proximity;
+  scroll-padding-left: 2px;
+  /* Soft fade at the horizontal edges so pills melt away instead of hard-cutting */
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
 }
 
 .genre-filter-scroll::-webkit-scrollbar {
@@ -499,87 +664,159 @@ button {
 
 /* Label for filter rows */
 .filter-row-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 1.5px;
+  letter-spacing: 1.6px;
   color: var(--text-muted);
-  margin-bottom: 8px;
-  font-weight: 600;
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+.filter-row-label::before {
+  content: '';
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent);
 }
 
 .filter-row + .filter-row {
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
+/* ---- Genre pills: refined glass chips ---- */
 .genre-pill {
   flex: 0 0 auto;
-  padding: 8px 20px;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: transparent;
+  scroll-snap-align: start;
+  position: relative;
+  padding: 9px 20px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--text-secondary);
   font-size: 0.85rem;
+  font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  transition: all var(--transition-fast);
   white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.25s var(--ease-out-expo), background 0.25s var(--ease-out-expo),
+              border-color 0.25s var(--ease-out-expo), transform 0.25s var(--ease-out-expo),
+              box-shadow 0.25s var(--ease-out-expo);
 }
 
 .genre-pill:hover {
-  border-color: rgba(255, 255, 255, 0.4);
+  border-color: rgba(255, 255, 255, 0.28);
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-2px);
+}
+
+.genre-pill:active {
+  transform: translateY(0) scale(0.96);
 }
 
 .genre-pill.active {
-  background: var(--text-primary);
-  color: var(--bg-primary);
-  border-color: var(--text-primary);
-  font-weight: 600;
+  background: linear-gradient(135deg, #ffffff 0%, #e7e7ee 100%);
+  color: #0b0b0f;
+  border-color: transparent;
+  font-weight: 700;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(255, 255, 255, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
+/* "Novità {anno}" — special green highlight with a live dot */
 .genre-pill-new {
-  border-color: rgba(76, 175, 80, 0.4);
-  background: rgba(76, 175, 80, 0.08);
+  border-color: rgba(76, 175, 80, 0.45);
+  background: rgba(76, 175, 80, 0.1);
+  color: #bfe9c1;
+  gap: 8px;
+}
+
+.genre-pill-new::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4CAF50;
+  box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.6);
+  animation: pillDotPulse 2s ease-out infinite;
+}
+
+@keyframes pillDotPulse {
+  0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.55); }
+  70% { box-shadow: 0 0 0 7px rgba(76, 175, 80, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); }
 }
 
 .genre-pill-new:hover {
   border-color: rgba(76, 175, 80, 0.7);
-  background: rgba(76, 175, 80, 0.15);
+  background: rgba(76, 175, 80, 0.18);
+  color: #d6f5d8;
 }
 
 .genre-pill-new.active {
-  background: #4CAF50;
+  background: linear-gradient(135deg, #5cc960 0%, #4CAF50 100%);
   color: #fff;
-  border-color: #4CAF50;
+  border-color: transparent;
+  box-shadow: 0 6px 20px rgba(76, 175, 80, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
-/* Company pills - slightly different accent style */
+.genre-pill-new.active::before {
+  background: #fff;
+  box-shadow: none;
+  animation: none;
+}
+
+/* ---- Company pills: premium "brand chip" accent style ---- */
 .company-pill {
   flex: 0 0 auto;
-  padding: 7px 18px;
-  border-radius: 20px;
-  border: 1px solid rgba(229, 9, 20, 0.25);
-  background: rgba(229, 9, 20, 0.06);
+  scroll-snap-align: start;
+  padding: 9px 18px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(229, 9, 20, 0.28);
+  background: linear-gradient(135deg, rgba(229, 9, 20, 0.12) 0%, rgba(229, 9, 20, 0.04) 100%);
   color: var(--text-secondary);
-  font-size: 0.82rem;
+  font-size: 0.83rem;
+  font-weight: 600;
+  letter-spacing: 0.2px;
   font-family: inherit;
   cursor: pointer;
-  transition: all var(--transition-fast);
   white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.25s var(--ease-out-expo), background 0.25s var(--ease-out-expo),
+              border-color 0.25s var(--ease-out-expo), transform 0.25s var(--ease-out-expo),
+              box-shadow 0.25s var(--ease-out-expo);
 }
 
 .company-pill:hover {
-  border-color: rgba(229, 9, 20, 0.5);
+  border-color: rgba(229, 9, 20, 0.55);
   color: var(--text-primary);
-  background: rgba(229, 9, 20, 0.12);
+  background: linear-gradient(135deg, rgba(229, 9, 20, 0.22) 0%, rgba(229, 9, 20, 0.08) 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(229, 9, 20, 0.18);
+}
+
+.company-pill:active {
+  transform: translateY(0) scale(0.96);
 }
 
 .company-pill.active {
-  background: var(--accent);
+  background: linear-gradient(135deg, #ff2b36 0%, var(--accent) 58%, #b00710 100%);
   color: #ffffff;
-  border-color: var(--accent);
-  font-weight: 600;
+  border-color: transparent;
+  font-weight: 700;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 22px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 /* ---------- Genre Results Grid ---------- */
@@ -692,13 +929,15 @@ button {
   position: relative;
   border-radius: var(--radius-md);
   overflow: hidden;
-  transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+  /* Subtle ring so posters read as "cards" on pure black */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 4px 16px rgba(0, 0, 0, 0.4);
+  transition: transform 0.35s var(--ease-out-expo), box-shadow 0.35s var(--ease-out-expo);
 }
 
 .card:hover {
-  transform: scale(1.08);
+  transform: translateY(-8px) scale(1.05);
   z-index: 5;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .card-poster {
@@ -706,20 +945,22 @@ button {
   height: var(--row-poster-height);
   object-fit: cover;
   border-radius: var(--radius-md);
-  transition: filter 0.3s ease;
+  transition: filter 0.3s ease, transform 0.5s var(--ease-out-expo);
+  background: var(--bg-card);
 }
 
 .card:hover .card-poster {
-  filter: brightness(0.6);
+  filter: brightness(0.55);
+  transform: scale(1.06);
 }
 
 .card-overlay {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, transparent 60%);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.35) 45%, transparent 70%);
   opacity: 0;
   transition: opacity var(--transition-normal);
-  padding: 12px;
+  padding: 14px 12px;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -730,9 +971,19 @@ button {
   opacity: 1;
 }
 
+.card-overlay > * {
+  transform: translateY(6px);
+  transition: transform 0.35s var(--ease-out-expo);
+}
+
+.card:hover .card-overlay > * {
+  transform: translateY(0);
+}
+
 .card-title {
-  font-size: 0.85rem;
+  font-size: 0.88rem;
   font-weight: 600;
+  line-height: 1.25;
   margin-bottom: 4px;
   color: var(--text-primary);
 }
@@ -743,9 +994,10 @@ button {
 }
 
 .card-rating {
-  color: #ffd700;
+  color: var(--gold);
   font-size: 0.75rem;
-  font-weight: 500;
+  font-weight: 600;
+  margin-bottom: 2px;
 }
 
 /* ---------- 10. Modal Overlay ---------- */
@@ -753,11 +1005,13 @@ button {
   position: fixed;
   inset: 0;
   z-index: 2000;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(5, 5, 8, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding-top: 2vh;
+  padding-top: 3vh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
@@ -775,21 +1029,22 @@ button {
   width: 90%;
   max-width: 900px;
   background: var(--bg-secondary);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: var(--shadow-modal);
   position: relative;
   margin-bottom: 4vh;
-  animation: modalSlideIn 0.4s ease;
+  animation: modalSlideIn 0.5s var(--ease-out-expo);
 }
 
 @keyframes modalSlideIn {
   from {
-    transform: translateY(30px);
+    transform: translateY(40px) scale(0.97);
     opacity: 0;
   }
   to {
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
     opacity: 1;
   }
 }
@@ -823,11 +1078,12 @@ button {
   position: absolute;
   top: calc(env(safe-area-inset-top, 0px) + 16px);
   right: 16px;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  background: rgba(20, 20, 20, 0.7);
-  border: none;
+  background: rgba(11, 11, 15, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(8px);
   color: #ffffff;
   font-size: 1.4rem;
   cursor: pointer;
@@ -888,6 +1144,74 @@ button {
   color: var(--text-secondary);
   font-size: 0.95rem;
   margin: 16px 0 24px;
+}
+
+/* ---------- Cast Strip ---------- */
+.cast-section {
+  margin-top: 8px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.cast-section-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+}
+
+.cast-strip {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 12px;
+  scrollbar-width: none;
+}
+
+.cast-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.cast-member {
+  flex: 0 0 auto;
+  width: 92px;
+  text-align: center;
+}
+
+.cast-photo {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center top;
+  margin: 0 auto 8px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  background: var(--bg-card);
+  transition: transform 0.3s var(--ease-out-expo), border-color 0.3s ease;
+}
+
+.cast-member:hover .cast-photo {
+  transform: scale(1.07);
+  border-color: var(--accent);
+}
+
+.cast-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+
+.cast-character {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.25;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* Modal watch progress bar */
@@ -1420,13 +1744,14 @@ button {
   border-radius: var(--radius-md);
   padding: 14px;
   cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease;
-  border: 1px solid transparent;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .episode-card:hover {
   background: var(--bg-hover);
-  border-color: var(--glass-border);
+  border-color: rgba(255, 255, 255, 0.14);
+  transform: translateY(-2px);
 }
 
 .episode-number {
@@ -1523,6 +1848,12 @@ button {
 
 .search-overlay.active {
   display: block;
+  animation: searchFadeIn 0.35s var(--ease-out-expo);
+}
+
+@keyframes searchFadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .search-title {
@@ -1550,7 +1881,9 @@ button {
 
 /* ---------- 15. Loading Skeletons ---------- */
 .skeleton {
-  background: #222;
+  background: linear-gradient(100deg, #1a1a22 40%, #242430 50%, #1a1a22 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
   border-radius: var(--radius-md);
 }
 
@@ -1748,11 +2081,6 @@ button {
     font-size: 1.5rem;
   }
 
-  .nav-search input:focus,
-  .nav-search input.active {
-    width: 180px;
-  }
-
   .content-row {
     padding: 0 3%;
   }
@@ -1762,8 +2090,94 @@ button {
     padding-right: 3%;
   }
 
+  /* backdrop-filter on an ancestor would create a containing block and
+     break the position:fixed bottom bar — use a solid background instead */
+  .navbar.scrolled {
+    background: rgba(13, 13, 18, 0.94);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  /* ---- Mobile navbar: top bar = brand + search + avatar ---- */
+  .navbar-inner {
+    gap: 10px;
+  }
+
+  /* Nav links become a fixed bottom tab bar */
   .navbar-nav {
-    gap: 16px;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: calc(58px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    margin: 0;
+    gap: 0;
+    background: rgba(13, 13, 18, 0.9);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border-top: 1px solid var(--glass-border);
+    align-items: stretch;
+    justify-content: space-around;
+    z-index: 999;
+  }
+
+  .navbar-nav a {
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 4px;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: var(--text-muted);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .navbar-nav .nav-icon {
+    display: block;
+  }
+
+  /* No underline indicator in the bottom bar */
+  .navbar-nav a::after {
+    display: none;
+  }
+
+  .navbar-nav a.active {
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  /* Search: tap the icon to expand a wide field; brand hides while typing */
+  .navbar-inner .nav-search {
+    margin-left: auto;
+  }
+
+  .nav-search.open {
+    flex: 1;
+    margin-left: 10px;
+  }
+
+  .nav-search input:focus,
+  .nav-search input.active,
+  .nav-search.open input {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .navbar.searching .navbar-brand {
+    display: none;
+  }
+
+  /* Keep page content & overlays clear of the bottom bar */
+  #app-container {
+    padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .search-overlay {
+    bottom: calc(58px + env(safe-area-inset-bottom, 0px));
   }
 
   .episode-grid {
@@ -1791,9 +2205,24 @@ button {
     padding-bottom: 8px;
   }
 
-  .genre-pill {
-    padding: 7px 16px;
+  /* Roomier scroll, tighter chips, comfy tap targets on mobile */
+  .genre-filter-scroll {
+    gap: 8px;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  }
+
+  .genre-pill,
+  .company-pill {
+    padding: 8px 16px;
+    min-height: 40px;
     font-size: 0.82rem;
+  }
+
+  /* Hover lift isn't useful on touch — keep the press feedback only */
+  .genre-pill:hover,
+  .company-pill:hover {
+    transform: none;
   }
 
   .genre-results-grid {
@@ -1843,14 +2272,6 @@ button {
     letter-spacing: 1px;
   }
 
-  .navbar-nav {
-    gap: 12px;
-  }
-
-  .navbar-nav a {
-    font-size: 0.8rem;
-  }
-
   .content-row .row-title {
     font-size: 1.1rem;
   }
@@ -1883,6 +2304,43 @@ button {
 
   .footer {
     padding: 32px 4% 16px;
+  }
+}
+
+/* ---------- Touch Devices (no hover) ---------- */
+/* On touch screens there is no hover, so the card overlay (title/rating)
+   would never appear. Show a permanent caption instead. */
+@media (hover: none) and (pointer: coarse) {
+  .card-overlay {
+    opacity: 1;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.25) 38%, transparent 62%);
+    padding: 10px;
+  }
+
+  .card-overlay > * {
+    transform: none;
+  }
+
+  .card-title {
+    font-size: 0.8rem;
+    -webkit-line-clamp: 2;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Tap feedback instead of hover lift */
+  .card:active {
+    transform: scale(0.96);
+  }
+
+  .card:active .card-poster {
+    filter: brightness(0.7);
+  }
+
+  /* Hover-revealed slider arrows aren't useful on touch — rely on swipe */
+  .row-arrow {
+    display: none;
   }
 }
 
@@ -1943,6 +2401,28 @@ button {
 ::selection {
   background: var(--accent);
   color: #ffffff;
+}
+
+/* ---------- Reduced Motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .hero-backdrop {
+    animation: none;
+  }
+
+  .hero-content > * {
+    animation-duration: 0.01ms;
+    animation-delay: 0s;
+  }
+
+  .card,
+  .card-poster,
+  .card-overlay > * {
+    transition-duration: 0.01ms;
+  }
+
+  .genre-pill-new::before {
+    animation: none;
+  }
 }
 
 /* ---------- PWA Standalone Mode ---------- */
@@ -2295,6 +2775,9 @@ body.tv-mode .navbar-nav a.tv-focused {
   inset: 0;
   z-index: 9999;
   background: var(--bg-primary);
+  background-image:
+    radial-gradient(1000px 600px at 50% -10%, rgba(229, 9, 20, 0.10), transparent 60%),
+    radial-gradient(800px 500px at 50% 110%, rgba(60, 60, 120, 0.08), transparent 60%);
   display: flex;
   align-items: center;
   justify-content: center;

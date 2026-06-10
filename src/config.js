@@ -14,8 +14,8 @@ export const CONFIG = {
 export const IMG_SIZES = {
   poster: '/w342',
   posterLg: '/w500',
-  backdrop: '/original',
-  backdropSm: '/w1280',
+  backdrop: '/w1280',
+  backdropSm: '/w780',
   profile: '/w185',
 };
 
