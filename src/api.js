@@ -76,13 +76,15 @@ export async function fetchByCompany(companyIds, type = 'movie', page = 1) {
 }
 
 // Fetch movie details
+// `recommendations` is far more relevant than `similar` (which is genre/keyword
+// based and often off-topic); we pool both and filter in buildRelated().
 export async function fetchMovieDetails(id) {
-  return tmdbFetch(`/movie/${id}`, { append_to_response: 'credits,videos,similar' });
+  return tmdbFetch(`/movie/${id}`, { append_to_response: 'credits,videos,recommendations,similar' });
 }
 
 // Fetch TV show details
 export async function fetchTVDetails(id) {
-  return tmdbFetch(`/tv/${id}`, { append_to_response: 'credits,videos,similar' });
+  return tmdbFetch(`/tv/${id}`, { append_to_response: 'credits,videos,recommendations,similar' });
 }
 
 // Fetch TV season details (episodes)

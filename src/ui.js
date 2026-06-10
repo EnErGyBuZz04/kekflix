@@ -1193,6 +1193,46 @@ export function isSearchOpen() {
 // ─── Detail Modal ─────────────────────────────────────
 let savedScrollY = 0;
 
+/**
+ * Build a relevant "you might also like" list from a detail payload.
+ * TMDB's recommendations/similar are noisy (obscure / off-theme / softcore
+ * titles slip in), so we pool both and keep only titles that share a genre and
+ * clear a vote threshold, sorted by popularity, with graceful fallbacks.
+ */
+function buildRelated(detail, type, limit = 12) {
+  const genreIds = new Set((detail.genres || []).map((g) => g.id));
+  const pool = [
+    ...(detail.recommendations?.results || []),
+    ...(detail.similar?.results || []),
+  ];
+
+  // De-duplicate, drop the title itself and anything without a poster
+  const seen = new Set([detail.id]);
+  const unique = [];
+  for (const r of pool) {
+    if (seen.has(r.id) || !r.poster_path) continue;
+    seen.add(r.id);
+    unique.push(r);
+  }
+
+  const sharesGenre = (r) => (r.genre_ids || []).some((id) => genreIds.has(id));
+  // TV vote counts run much lower than film, so use a gentler floor
+  const minVotes = type === 'tv' ? 40 : 120;
+  const byPopularity = (a, b) => (b.popularity || 0) - (a.popularity || 0);
+
+  // Tier 1: on-genre and reputable. Tier 2: on-genre (any votes).
+  // Tier 3: whatever's left, so the row is never suspiciously empty.
+  const tier1 = unique.filter((r) => sharesGenre(r) && (r.vote_count || 0) >= minVotes);
+  const tier2 = unique.filter((r) => sharesGenre(r) && !tier1.includes(r));
+  const tier3 = unique.filter((r) => !sharesGenre(r));
+
+  tier1.sort(byPopularity);
+  tier2.sort(byPopularity);
+  tier3.sort(byPopularity);
+
+  return [...tier1, ...tier2, ...tier3].slice(0, limit);
+}
+
 export async function openDetail(id, type = 'movie') {
   modalOverlay.classList.add('active');
   // iOS Safari needs position:fixed to prevent background scroll
@@ -1412,12 +1452,15 @@ export async function openDetail(id, type = 'movie') {
       `;
     }
 
-    // Similar content
-    const similar = detail.similar?.results?.filter(r => r.poster_path).slice(0, 10) || [];
+    // Related content. TMDB's `recommendations` and `similar` are both noisy
+    // (they happily surface obscure, off-theme — even softcore — titles). We
+    // pool both, then keep only titles that share a genre with this one and
+    // clear a vote floor, sorted by popularity. See buildRelated().
+    const similar = buildRelated(detail, type);
     if (similar.length > 0) {
       bodyHTML += `
         <div class="modal-similar">
-          <h3 class="row-title" style="margin-top:32px">Simili</h3>
+          <h3 class="row-title" style="margin-top:32px">Ti potrebbe piacere</h3>
           <div class="row-slider">
             ${similar.map(item => {
               const p = getPosterUrl(item.poster_path);
