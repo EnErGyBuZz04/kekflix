@@ -48,6 +48,8 @@ let currentPage = 'home';
 let currentHeroItem = null;
 let activeGenreFilter = null; // { id, type } or null for 'Tutti'
 let currentModalDetail = null; // { title, posterPath } — set when detail modal opens
+let currentModal = null; // { id, type } — open detail modal (for routing)
+let currentPlayer = null; // { type, id, season, episode } — open player (for routing)
 
 // ─── Italian Language Filter ──────────────────────────
 // Keeps only content likely available in Italian audio/subtitles
@@ -387,6 +389,7 @@ function attachGenreFilterEvents(mediaType) {
         activeGenreFilter = { id: parseInt(genreId), type: mediaType };
         renderGenreGrid(parseInt(genreId), mediaType);
       }
+      writeRoute();
     });
   });
 
@@ -400,6 +403,7 @@ function attachGenreFilterEvents(mediaType) {
       const companyName = pill.dataset.companyName;
       activeGenreFilter = { ids: companyIds, type: mediaType, isCompany: true };
       renderCompanyGrid(companyIds, companyName, mediaType);
+      writeRoute();
     });
   });
 }
@@ -1235,6 +1239,8 @@ function buildRelated(detail, type, limit = 12) {
 
 export async function openDetail(id, type = 'movie') {
   modalOverlay.classList.add('active');
+  currentModal = { id, type };
+  writeRoute();
   // iOS Safari needs position:fixed to prevent background scroll
   savedScrollY = window.scrollY;
   document.body.style.position = 'fixed';
@@ -1399,6 +1405,13 @@ export async function openDetail(id, type = 'movie') {
           }
         }
       } catch (err) {}
+
+      // Prefer the instant local cache when it's further along, so reopening
+      // from the modal / Continue Watching also resumes at the exact moment.
+      const localPos = type === 'tv'
+        ? (activeSeasonNum ? readLivePosition(progressProfile.id, 'tv', id, activeSeasonNum, activeEpisodeNum) : 0)
+        : readLivePosition(progressProfile.id, 'movie', id);
+      if (localPos > activeStartTime) activeStartTime = localPos;
     }
 
     // Trailer section
@@ -1644,8 +1657,14 @@ let playerAutoSaveInterval = null;
 export function openPlayer(type, id, season, episode, title, posterPath, startTime) {
   const url = getEmbedUrl(type, id, season, episode, startTime);
 
+  const wasPlaying = !!currentPlayer;   // episode switch vs fresh open
   closePlayer(false);
-  history.pushState({ cinema: true }, '');
+  currentPlayer = { type, id, season: season || null, episode: episode || null };
+  // Mirror the player into the URL. Fresh open pushes a history entry so Back
+  // closes the player; an episode switch replaces it (no history pile-up).
+  const hash = buildHash(currentState());
+  if (wasPlaying) history.replaceState({ cinema: true }, '', hash);
+  else history.pushState({ cinema: true }, '', hash);
 
   // Block popup ads by intercepting window.open
   const origOpen = window.open;
@@ -1682,6 +1701,10 @@ export function openPlayer(type, id, season, episode, title, posterPath, startTi
       // Update tracking data in memory only
       if (typeof currentTime === 'number') playerTrackingData.currentTime = currentTime;
       if (typeof duration === 'number' && duration > 0) playerTrackingData.duration = duration;
+
+      // Mirror the live position to localStorage on every tick (throttled) so a
+      // hard close/refresh never loses more than a couple of seconds.
+      if (evtType === 'timeupdate') cacheLivePosition();
 
       // Only save to DB when the video ends
       if (evtType === 'ended') {
@@ -1882,9 +1905,68 @@ function savePlayerProgress(completed) {
     durationSeconds: d.duration,
     completed: isCompleted,
   }).catch(err => console.warn('Watch progress save failed:', err));
+
+  // Keep the instant local cache in sync (and clear it once finished)
+  if (isCompleted) clearLivePosition(profile.id, d.type, d.id, d.season, d.episode);
+  else cacheLivePosition(true);
 }
 
+// ── Instant resume cache ──────────────────────────────
+// The DB only gets written every 30s, so a hard close/refresh would lose the
+// last stretch. We mirror the live position into localStorage on every
+// timeupdate (synchronous, survives a tab close instantly) and prefer it on
+// restore. This is what guarantees "resume at the exact moment".
+function posKey(profileId, type, id, season, episode) {
+  let k = `kekflix:pos:${profileId}:${type}-${id}`;
+  if (type === 'tv' && season) k += `-${season}-${episode}`;
+  return k;
+}
+
+let _lastPosWrite = 0;
+function cacheLivePosition(force = false) {
+  const profile = getCurrentProfile();
+  if (!profile || !playerTrackingData) return;
+  const d = playerTrackingData;
+  if (!(d.currentTime > 0)) return;
+  const now = Date.now();
+  if (!force && now - _lastPosWrite < 2000) return;  // light throttle
+  _lastPosWrite = now;
+  try {
+    localStorage.setItem(
+      posKey(profile.id, d.type, d.id, d.season, d.episode),
+      JSON.stringify({ t: d.currentTime, d: d.duration, ts: now })
+    );
+  } catch (e) { /* storage full / disabled */ }
+}
+
+function readLivePosition(profileId, type, id, season, episode) {
+  try {
+    const raw = localStorage.getItem(posKey(profileId, type, id, season, episode));
+    if (!raw) return 0;
+    const o = JSON.parse(raw);
+    if (o.d > 0 && (o.d - o.t) <= 120) return 0;   // basically finished
+    return o.t > 30 ? o.t : 0;
+  } catch (e) { return 0; }
+}
+
+function clearLivePosition(profileId, type, id, season, episode) {
+  try { localStorage.removeItem(posKey(profileId, type, id, season, episode)); } catch (e) {}
+}
+
+// Flush the live position the instant the page is hidden or closing. localStorage
+// is synchronous so it always lands; the DB save is best-effort.
+function flushPlayerOnHide() {
+  if (!playerTrackingData) return;
+  cacheLivePosition(true);
+  savePlayerProgress(false);
+}
+window.addEventListener('pagehide', flushPlayerOnHide);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushPlayerOnHide();
+});
+
 export function closePlayer(goBack = true) {
+  currentPlayer = null;
   if (!playerOverlay) return;
 
   // Save final progress before closing
@@ -2037,15 +2119,14 @@ async function refreshContinueWatching() {
 }
 
 export function isPlayerOpen() { return !!playerOverlay; }
-
-// Back button closes player
-window.addEventListener('popstate', () => {
-  if (playerOverlay) closePlayer(false);
-});
+// Browser Back / Forward is handled by the router's popstate listener
+// (startRouter), which reconciles the whole UI to the URL.
 
 // ─── Modal Close ──────────────────────────────────────
 export function closeModal() {
   modalOverlay.classList.remove('active');
+  currentModal = null;
+  writeRoute();
   // Restore scroll position
   document.body.style.position = '';
   document.body.style.top = '';
@@ -2180,6 +2261,201 @@ export function initNavbarScroll() {
   );
 }
 
+// ─── Routing (hash-based state persistence) ───────────
+// The full UI state — page, active filter, open modal, playing title — is
+// mirrored into location.hash so a refresh (or a shared link) restores exactly
+// where the user was. Base/filter/modal use replaceState (no extra history);
+// the player uses pushState so the Back button closes it.
+let routeSyncing = false;   // true while applyRoute() mutates the UI
+let routeInitialized = false;
+
+function serializeFilter(f) {
+  if (!f) return '';
+  if (f.isCompany) return 'c' + f.ids;            // ids = pipe-joined string
+  if (f.id === 'new-releases') return 'new';
+  if (typeof f.id === 'number') return 'g' + f.id;
+  return '';
+}
+
+function serializePlay(p) {
+  if (!p) return '';
+  let v = `${p.type}-${p.id}`;
+  if (p.type === 'tv' && p.season) v += `-${p.season}-${p.episode}`;
+  return v;
+}
+
+function buildHash(state) {
+  const q = new URLSearchParams();
+  if (state.page && state.page !== 'home') q.set('page', state.page);
+  if (state.filter) q.set('f', state.filter);
+  if (state.modal) q.set('modal', state.modal);
+  if (state.play) q.set('play', state.play);
+  const s = q.toString();
+  return s ? '#?' + s : '#';
+}
+
+function currentState() {
+  return {
+    page: currentPage,
+    filter: serializeFilter(activeGenreFilter),
+    modal: currentModal ? `${currentModal.type}-${currentModal.id}` : null,
+    play: serializePlay(currentPlayer) || null,
+  };
+}
+
+function writeRoute() {
+  if (routeSyncing) return;
+  const hash = buildHash(currentState());
+  if (hash === (location.hash || '#')) return;
+  history.replaceState(null, '', hash);
+}
+
+function setActiveNav(page) {
+  $$('#nav-links a').forEach((l) => l.classList.toggle('active', l.dataset.page === page));
+}
+
+function lookupCompanyName(ids, mediaType) {
+  const list = mediaType === 'tv' ? TV_COMPANY_LIST : COMPANY_LIST;
+  const found = list.find((c) => c.ids.join('|') === ids);
+  return found ? found.name : 'Studio';
+}
+
+function setActivePill(f) {
+  const bar = $('#genre-filter-bar');
+  if (!bar) return;
+  bar.querySelectorAll('.genre-pill, .company-pill').forEach((p) => p.classList.remove('active'));
+  if (!f) {
+    bar.querySelector('.genre-pill[data-genre-id="all"]')?.classList.add('active');
+  } else if (f.isCompany) {
+    bar.querySelector(`.company-pill[data-company-ids="${f.ids}"]`)?.classList.add('active');
+  } else if (f.id === 'new-releases') {
+    bar.querySelector('.genre-pill[data-genre-id="new-releases"]')?.classList.add('active');
+  } else {
+    bar.querySelector(`.genre-pill[data-genre-id="${f.id}"]`)?.classList.add('active');
+  }
+}
+
+async function applyFilterRender(mediaType, f) {
+  if (f === 'new') {
+    activeGenreFilter = { id: 'new-releases', type: mediaType };
+    await renderNewReleasesGrid(mediaType);
+  } else if (f[0] === 'g') {
+    const id = parseInt(f.slice(1));
+    activeGenreFilter = { id, type: mediaType };
+    await renderGenreGrid(id, mediaType);
+  } else if (f[0] === 'c') {
+    const ids = f.slice(1);
+    activeGenreFilter = { ids, type: mediaType, isCompany: true };
+    await renderCompanyGrid(ids, lookupCompanyName(ids, mediaType), mediaType);
+  }
+  setActivePill(activeGenreFilter);
+}
+
+async function restoreBase(page, f) {
+  setActiveNav(page);
+  if (page === 'movies' || page === 'tv') {
+    const mediaType = page === 'movies' ? 'movie' : 'tv';
+    if (f) {
+      // Filtered grid: render the filter bar fresh, then the grid
+      currentPage = page;
+      activeGenreFilter = null;
+      heroSection.classList.add('hidden');
+      contentRows.innerHTML = '';
+      await applyFilterRender(mediaType, f);
+    } else if (page === 'movies') {
+      await renderMoviesPage();
+    } else {
+      await renderTVPage();
+    }
+  } else {
+    activeGenreFilter = null;
+    await renderHomePage();
+  }
+}
+
+async function getResumeInfo(type, id, season, episode) {
+  let title = '', poster = '', startTime = 0;
+  try {
+    const detail = type === 'tv' ? await fetchTVDetails(id) : await fetchMovieDetails(id);
+    title = detail.title || detail.name || '';
+    poster = detail.poster_path || '';
+    const profile = getCurrentProfile();
+    if (profile) {
+      const prog = await getEpisodeProgress(profile.id, id);
+      if (prog && prog.length) {
+        const rec = (type === 'tv' && season && episode)
+          ? prog.find((p) => p.season === season && p.episode === episode)
+          : prog.find((p) => !p.season && !p.episode);
+        if (rec && !rec.completed && rec.progress_seconds > 30) startTime = rec.progress_seconds;
+      }
+      // The local cache is more up-to-date than the DB after a hard close
+      const local = readLivePosition(profile.id, type, id, season, episode);
+      if (local > startTime) startTime = local;
+    }
+  } catch (e) { /* best-effort */ }
+  return { title, poster, startTime };
+}
+
+async function restorePlayer(playStr) {
+  const parts = playStr.split('-');
+  const type = parts[0];
+  const id = parseInt(parts[1]);
+  const season = parts[2] ? parseInt(parts[2]) : undefined;
+  const episode = parts[3] ? parseInt(parts[3]) : undefined;
+  // Rebuild a base history entry (without play) so the player's Back/✕ has
+  // somewhere to return to even right after a hard refresh.
+  history.replaceState(null, '', buildHash({ ...currentState(), play: null }));
+  const { title, poster, startTime } = await getResumeInfo(type, id, season, episode);
+  openPlayer(type, id, season, episode, title, poster, startTime);
+}
+
+async function applyRoute() {
+  if (routeSyncing) return;
+  routeSyncing = true;
+  try {
+    const q = new URLSearchParams((location.hash || '').replace(/^#\??/, ''));
+    const page = q.get('page') || 'home';
+    const f = q.get('f') || '';
+    const modal = q.get('modal');
+    const play = q.get('play');
+
+    // 1. Base page + filter — only re-render if it actually changed
+    if (!routeInitialized || page !== currentPage || f !== serializeFilter(activeGenreFilter)) {
+      await restoreBase(page, f);
+    }
+
+    // 2. Detail modal
+    const mCur = currentModal ? `${currentModal.type}-${currentModal.id}` : null;
+    if (modal !== mCur) {
+      if (modal) {
+        const dash = modal.indexOf('-');
+        await openDetail(parseInt(modal.slice(dash + 1)), modal.slice(0, dash));
+      } else if (currentModal) {
+        closeModal();
+      }
+    }
+
+    // 3. Player
+    const pCur = serializePlay(currentPlayer) || null;
+    if (play !== pCur) {
+      if (play) await restorePlayer(play);
+      else if (currentPlayer) closePlayer(false);
+    }
+  } catch (e) {
+    console.error('Route restore failed:', e);
+  } finally {
+    routeInitialized = true;
+    routeSyncing = false;
+  }
+}
+
+// Entry point called once after the app is authenticated
+export async function startRouter() {
+  window.addEventListener('popstate', () => { applyRoute(); });
+  window.addEventListener('hashchange', () => { applyRoute(); });
+  await applyRoute();
+}
+
 // ─── Navigation ───────────────────────────────────────
 export function initNavigation() {
   const links = $$('#nav-links a');
@@ -2227,6 +2503,7 @@ async function navigateTo(page) {
       await renderTVPage();
       break;
   }
+  writeRoute();
 }
 
 // ─── Modal Events ─────────────────────────────────────

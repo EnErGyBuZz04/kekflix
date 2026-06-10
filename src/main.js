@@ -1,5 +1,5 @@
 import {
-  renderHomePage,
+  startRouter,
   initSearch,
   initNavbarScroll,
   initNavigation,
@@ -38,9 +38,9 @@ async function initApp() {
   initProfileBadge();
   initTvNavigation();
 
-  // Render homepage
+  // Restore the route (page / filter / modal / player) from the URL, or home
   try {
-    await renderHomePage();
+    await startRouter();
     console.log('✅ KEKFLIX loaded successfully');
   } catch (err) {
     console.error('❌ Failed to load KEKFLIX:', err);
