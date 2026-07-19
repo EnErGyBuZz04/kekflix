@@ -1,0 +1,32 @@
+name: Keep Supabase awake
+
+# Interroga il progetto Supabase una volta al giorno per evitare la messa in
+# pausa automatica del piano free (che scatta dopo ~7 giorni di inattivita').
+# La chiave usata e' la anon key pubblica (gia' presente nel frontend), protetta
+# da Row Level Security: nessun segreto sensibile.
+
+on:
+  schedule:
+    - cron: "23 5 * * *"   # ogni giorno alle 05:23 UTC
+  workflow_dispatch:        # avvio manuale dalla tab Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query Supabase (kekflix)
+        env:
+          SUPABASE_URL: https://nimtzcwdnmalqgqxpofv.supabase.co
+          SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5pbXR6Y3dkbm1hbHFncXhwb2Z2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzNDc5MTEsImV4cCI6MjA5NTkyMzkxMX0.UzX9Cx7u7UxtjDr0xFmfKlszMDpNm0XuMN8DX2GN6jc
+          TABLE: profiles_public
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/$TABLE?select=*&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          echo "$TABLE -> HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::Keep-alive fallito (HTTP $code)"
+            exit 1
+          fi
+          echo "Progetto attivo."
