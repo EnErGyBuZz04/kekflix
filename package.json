@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "catalog": "node scripts/build-catalog.mjs",
+    "prebuild": "node scripts/build-catalog.mjs --if-stale",
     "build": "vite build",
     "preview": "vite preview"
   },

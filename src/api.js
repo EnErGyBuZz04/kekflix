@@ -102,18 +102,44 @@ export async function searchMulti(query, page = 1) {
 // ─── Streaming source availability ────────────────────
 // vixsrc carries only part of TMDB, so a title can be perfectly real and still
 // have no stream — that's exactly what the player's "Request failed with status
-// code 404" means. The catalogue has no CORS headers and is far too big to ship
-// to the browser, so /api/vix-availability answers per title, server-side.
+// code 404" means.
 //
-// Returns null for "don't know": an unreachable catalogue must never read as
-// "unavailable", or we'd block titles that play perfectly well.
+// The catalogue has no CORS headers, so the browser can't read it from vixsrc;
+// and the site is served by a static host, so there is no server to ask either.
+// It's therefore snapshotted into /catalog/*.json at build time (see
+// scripts/build-catalog.mjs) — a few tens of KB gzipped. Where serverless
+// functions do exist (local dev, a Vercel preview) /api/* still answers, and is
+// used as a fallback so an old build keeps working.
+//
+// Everything here returns null for "don't know": an unreachable catalogue must
+// never read as "unavailable", or we'd block titles that play perfectly well.
+
+const CATALOG_BASE = '/catalog';
+const IT_CACHE_PREFIX = 'kekflix:itcatalog:';
+const IT_CACHE_TTL = 6 * 60 * 60 * 1000;
+
+// One in-flight request per file, shared by every caller
+const catalogRequests = new Map();
+
+function loadSnapshot(file) {
+  if (!catalogRequests.has(file)) {
+    const request = fetch(`${CATALOG_BASE}/${file}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`${file} responded ${res.status}`);
+        return res.json();
+      })
+      .catch((err) => {
+        catalogRequests.delete(file);   // let a later call retry
+        throw err;
+      });
+    catalogRequests.set(file, request);
+  }
+  return catalogRequests.get(file);
+}
 
 // The set of ids that stream with Italian audio, cached locally for the day.
 // Null means "couldn't load it" — callers fall back to the heuristic rather
 // than showing an empty page.
-const IT_CACHE_PREFIX = 'kekflix:itcatalog:';
-const IT_CACHE_TTL = 6 * 60 * 60 * 1000;
-
 export async function fetchItalianCatalog(type = 'movie') {
   const kind = type === 'tv' ? 'tv' : 'movie';
   const memKey = `itcat_${kind}`;
@@ -131,50 +157,118 @@ export async function fetchItalianCatalog(type = 'movie') {
     }
   } catch (e) { /* unreadable cache → refetch */ }
 
+  let ids = null;
   try {
-    const res = await fetch(`/api/vix-catalog?type=${kind}`);
-    if (!res.ok) throw new Error(`catalog responded ${res.status}`);
-    const data = await res.json();
-    if (!Array.isArray(data.ids) || data.ids.length === 0) throw new Error('empty catalog');
-
-    const idSet = new Set(data.ids);
-    cache.set(memKey, idSet);
-    try {
-      localStorage.setItem(IT_CACHE_PREFIX + kind, JSON.stringify({ at: Date.now(), ids: data.ids }));
-    } catch (e) { /* quota → memory only */ }
-    return idSet;
+    ids = await loadSnapshot(`it-${kind}.json`);
   } catch (e) {
-    console.warn('Italian catalog unavailable:', e);
-    return null;
+    try {
+      const res = await fetch(`/api/vix-catalog?type=${kind}`);
+      if (!res.ok) throw new Error(`catalog responded ${res.status}`);
+      ids = (await res.json()).ids;
+    } catch (err) {
+      console.warn('Italian catalog unavailable:', err);
+      return null;
+    }
   }
+
+  if (!Array.isArray(ids) || ids.length === 0) return null;
+
+  const idSet = new Set(ids);
+  cache.set(memKey, idSet);
+  try {
+    localStorage.setItem(IT_CACHE_PREFIX + kind, JSON.stringify({ at: Date.now(), ids }));
+  } catch (e) { /* quota → memory only */ }
+  return idSet;
+}
+
+// "1-3,7" → 1, 2, 3, 7 (the snapshot stores episode numbers as ranges)
+function expandEpisodes(seasons) {
+  const keys = new Set();
+  for (const [season, spec] of Object.entries(seasons || {})) {
+    for (const part of String(spec).split(',')) {
+      const [from, to] = part.split('-');
+      const first = parseInt(from, 10);
+      const last = to === undefined ? first : parseInt(to, 10);
+      if (!Number.isInteger(first) || !Number.isInteger(last)) continue;
+      for (let episode = first; episode <= last; episode++) keys.add(`${season}-${episode}`);
+    }
+  }
+  return keys;
+}
+
+// Answered from the snapshots, so it costs nothing after the first title.
+// `available` (the full catalogue) and `italian` (the `lang=it` one) are
+// different questions: a title missing from the Italian list usually still
+// plays, just in its original language.
+async function fullCatalog(kind) {
+  const memKey = `allcat_${kind}`;
+  if (cache.has(memKey)) return cache.get(memKey);
+  const ids = await loadSnapshot(`all-${kind}.json`);
+  const idSet = new Set(ids);
+  cache.set(memKey, idSet);
+  return idSet;
+}
+
+async function availabilityFromSnapshot(kind, tmdbId, wantEpisodes) {
+  const [italianIds, allIds] = await Promise.all([
+    fetchItalianCatalog(kind),
+    fullCatalog(kind).catch(() => null),
+  ]);
+  if (!italianIds && !allIds) throw new Error('no snapshot');
+
+  const italian = italianIds ? italianIds.has(tmdbId) : false;
+  const value = {
+    // With no full list, being in the Italian one is proof enough it exists
+    available: allIds ? allIds.has(tmdbId) : italian,
+    italian,
+    episodes: null,
+  };
+
+  if (wantEpisodes) {
+    try {
+      const byShow = await loadSnapshot('episodes-it.json');
+      value.episodes = expandEpisodes(byShow[tmdbId]);
+    } catch (e) { /* no episode list → no per-episode check */ }
+  }
+  return value;
 }
 
 export async function fetchSourceAvailability(type, tmdbId, withEpisodes = false) {
   const kind = type === 'tv' ? 'tv' : 'movie';
-  const memKey = `vixavail_${kind}_${tmdbId}_${withEpisodes ? 1 : 0}`;
+  const id = parseInt(tmdbId, 10);
+  if (!Number.isInteger(id)) return null;
+
+  const memKey = `vixavail_${kind}_${id}_${withEpisodes ? 1 : 0}`;
   if (cache.has(memKey)) return cache.get(memKey);
 
-  try {
-    const url = `/api/vix-availability?type=${kind}&tmdb_id=${tmdbId}${withEpisodes ? '&episodes=1' : ''}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`availability responded ${res.status}`);
-    const data = await res.json();
-    if (typeof data.available !== 'boolean') throw new Error('bad payload');
+  const wantEpisodes = withEpisodes && kind === 'tv';
+  let value = null;
 
-    const value = {
-      available: data.available,
-      // `italian` false just means no Italian track is listed — it still plays
-      italian: data.italian === true,
-      episodes: Array.isArray(data.episodes)
-        ? new Set(data.episodes.map(([s, e]) => `${s}-${e}`))
-        : null,
-    };
-    cache.set(memKey, value);
-    return value;
+  try {
+    value = await availabilityFromSnapshot(kind, id, wantEpisodes);
   } catch (e) {
-    return null;
+    try {
+      const url = `/api/vix-availability?type=${kind}&tmdb_id=${id}${wantEpisodes ? '&episodes=1' : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`availability responded ${res.status}`);
+      const data = await res.json();
+      if (typeof data.available !== 'boolean') throw new Error('bad payload');
+      value = {
+        available: data.available,
+        italian: data.italian === true,
+        episodes: Array.isArray(data.episodes)
+          ? new Set(data.episodes.map(([s, e]) => `${s}-${e}`))
+          : null,
+      };
+    } catch (err) {
+      return null;
+    }
   }
+
+  cache.set(memKey, value);
+  return value;
 }
+
 
 // Get embed URL for player
 export function getEmbedUrl(type, tmdbId, season, episode, startTime) {
