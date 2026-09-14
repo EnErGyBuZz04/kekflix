@@ -99,19 +99,80 @@ export async function searchMulti(query, page = 1) {
   return data.results.filter(r => r.media_type === 'movie' || r.media_type === 'tv');
 }
 
-// Fetch vixsrc.to catalog
-export async function fetchVixCatalog(type = 'movie') {
-  const cacheKey = `vix_${type}`;
-  if (cache.has(cacheKey)) return cache.get(cacheKey);
+// ─── Streaming source availability ────────────────────
+// vixsrc carries only part of TMDB, so a title can be perfectly real and still
+// have no stream — that's exactly what the player's "Request failed with status
+// code 404" means. The catalogue has no CORS headers and is far too big to ship
+// to the browser, so /api/vix-availability answers per title, server-side.
+//
+// Returns null for "don't know": an unreachable catalogue must never read as
+// "unavailable", or we'd block titles that play perfectly well.
+
+// The set of ids that stream with Italian audio, cached locally for the day.
+// Null means "couldn't load it" — callers fall back to the heuristic rather
+// than showing an empty page.
+const IT_CACHE_PREFIX = 'kekflix:itcatalog:';
+const IT_CACHE_TTL = 6 * 60 * 60 * 1000;
+
+export async function fetchItalianCatalog(type = 'movie') {
+  const kind = type === 'tv' ? 'tv' : 'movie';
+  const memKey = `itcat_${kind}`;
+  if (cache.has(memKey)) return cache.get(memKey);
+
   try {
-    const res = await fetch(`${CONFIG.VIXSRC_BASE}/api/list/${type}`);
+    const raw = localStorage.getItem(IT_CACHE_PREFIX + kind);
+    if (raw) {
+      const entry = JSON.parse(raw);
+      if (Array.isArray(entry.ids) && entry.ids.length && Date.now() - entry.at < IT_CACHE_TTL) {
+        const cached = new Set(entry.ids);
+        cache.set(memKey, cached);
+        return cached;
+      }
+    }
+  } catch (e) { /* unreadable cache → refetch */ }
+
+  try {
+    const res = await fetch(`/api/vix-catalog?type=${kind}`);
+    if (!res.ok) throw new Error(`catalog responded ${res.status}`);
     const data = await res.json();
-    const idSet = new Set(data.map(item => item.tmdb_id));
-    cache.set(cacheKey, idSet);
+    if (!Array.isArray(data.ids) || data.ids.length === 0) throw new Error('empty catalog');
+
+    const idSet = new Set(data.ids);
+    cache.set(memKey, idSet);
+    try {
+      localStorage.setItem(IT_CACHE_PREFIX + kind, JSON.stringify({ at: Date.now(), ids: data.ids }));
+    } catch (e) { /* quota → memory only */ }
     return idSet;
   } catch (e) {
-    console.warn('Failed to fetch vixsrc catalog:', e);
-    return new Set();
+    console.warn('Italian catalog unavailable:', e);
+    return null;
+  }
+}
+
+export async function fetchSourceAvailability(type, tmdbId, withEpisodes = false) {
+  const kind = type === 'tv' ? 'tv' : 'movie';
+  const memKey = `vixavail_${kind}_${tmdbId}_${withEpisodes ? 1 : 0}`;
+  if (cache.has(memKey)) return cache.get(memKey);
+
+  try {
+    const url = `/api/vix-availability?type=${kind}&tmdb_id=${tmdbId}${withEpisodes ? '&episodes=1' : ''}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`availability responded ${res.status}`);
+    const data = await res.json();
+    if (typeof data.available !== 'boolean') throw new Error('bad payload');
+
+    const value = {
+      available: data.available,
+      // `italian` false just means no Italian track is listed — it still plays
+      italian: data.italian === true,
+      episodes: Array.isArray(data.episodes)
+        ? new Set(data.episodes.map(([s, e]) => `${s}-${e}`))
+        : null,
+    };
+    cache.set(memKey, value);
+    return value;
+  } catch (e) {
+    return null;
   }
 }
 

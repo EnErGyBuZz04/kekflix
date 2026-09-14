@@ -4,6 +4,8 @@ import {
   initNavbarScroll,
   initNavigation,
   initModalEvents,
+  loadProfileLists,
+  loadItalianCatalog,
 } from './ui.js';
 import { renderProfileScreen, checkExistingSession, initProfileBadge } from './profile.js';
 import { initTvNavigation } from './tv-nav.js';
@@ -40,6 +42,16 @@ async function initApp() {
 
   // Restore the route (page / filter / modal / player) from the URL, or home
   try {
+    // Favourites, watched badges and the Italian catalogue — all needed before
+    // the first card renders. The catalogue is capped so a slow source can't
+    // hold up the app: it just applies from the next render on.
+    await Promise.all([
+      loadProfileLists().catch(() => {}),
+      Promise.race([
+        loadItalianCatalog().catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 4000)),
+      ]),
+    ]);
     await startRouter();
     console.log('✅ KEKFLIX loaded successfully');
   } catch (err) {

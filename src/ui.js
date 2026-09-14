@@ -10,11 +10,24 @@ import {
   fetchTVDetails,
   fetchSeasonDetails,
   searchMulti,
+  fetchSourceAvailability,
+  fetchItalianCatalog,
   getEmbedUrl,
   getPosterUrl,
   getBackdropUrl,
 } from './api.js';
-import { saveWatchProgress, getWatchHistory, markWatchCompleted, getEpisodeProgress, getCurrentProfile } from './supabase.js';
+import {
+  saveWatchProgress,
+  getWatchHistory,
+  dismissFromContinueWatching,
+  getEpisodeProgress,
+  getCurrentProfile,
+  toggleFavorite,
+  hideFromRecentlyWatched,
+  getFavorites,
+  getRecentlyWatched,
+  getWatchedIds,
+} from './supabase.js';
 
 // ─── DOM References ───────────────────────────────────
 const $ = (sel) => document.querySelector(sel);
@@ -51,25 +64,99 @@ let currentModalDetail = null; // { title, posterPath } — set when detail moda
 let currentModal = null; // { id, type } — open detail modal (for routing)
 let currentPlayer = null; // { type, id, season, episode } — open player (for routing)
 
+// ─── Profile lists (favourites + "already watched" badges) ──
+// Both lists are small and consulted on every single card we render, so we keep
+// them in memory for the session and refresh them when they change.
+const favoriteKeys = new Set();
+const watchedKeys = new Set();
+const listKey = (type, id) => `${type}_${id}`;
+
+export async function loadProfileLists() {
+  favoriteKeys.clear();
+  watchedKeys.clear();
+  const profile = getCurrentProfile();
+  if (!profile) return;
+
+  const [favs, watched] = await Promise.all([
+    getFavorites(profile.id).catch(() => []),
+    getWatchedIds(profile.id).catch(() => []),
+  ]);
+  favs.forEach((f) => favoriteKeys.add(listKey(f.media_type, f.tmdb_id)));
+  watched.forEach((w) => watchedKeys.add(listKey(w.media_type, w.tmdb_id)));
+}
+
+function isFavorite(type, id) { return favoriteKeys.has(listKey(type, id)); }
+function isWatched(type, id) { return watchedKeys.has(listKey(type, id)); }
+
+// Green "seen it" check, shown on a card once every tracked episode (or the
+// movie itself) is finished.
+function watchedBadge(type, id) {
+  if (!isWatched(type, id)) return '';
+  return `<div class="card-watched" aria-label="Già visto" title="Già visto">
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+  </div>`;
+}
+
+// Refresh the badge set after the player closes, then repaint what is on screen
+async function refreshWatchedBadges() {
+  const profile = getCurrentProfile();
+  if (!profile) return;
+  const before = watchedKeys.size;
+  const watched = await getWatchedIds(profile.id).catch(() => null);
+  if (!watched) return;
+  watchedKeys.clear();
+  watched.forEach((w) => watchedKeys.add(listKey(w.media_type, w.tmdb_id)));
+  if (watchedKeys.size !== before) repaintWatchedBadges();
+}
+
+function repaintWatchedBadges() {
+  $$('.card[data-id]').forEach((card) => {
+    if (card.classList.contains('cw-card')) return;
+    const should = isWatched(card.dataset.type || 'movie', parseInt(card.dataset.id));
+    const badge = card.querySelector('.card-watched');
+    if (should && !badge) {
+      card.querySelector('.card-poster')?.insertAdjacentHTML('afterend', watchedBadge(card.dataset.type || 'movie', parseInt(card.dataset.id)));
+    } else if (!should && badge) {
+      badge.remove();
+    }
+  });
+}
+
 // ─── Italian Language Filter ──────────────────────────
-// Keeps only content likely available in Italian audio/subtitles
-function hasItalianAvailable(item) {
-  // Italian originals — always available
-  if (item.original_language === 'it') return true;
-  // English content — almost universally dubbed to Italian
-  if (item.original_language === 'en') return true;
-  // For other languages: if TMDB has a localized Italian title, dubbing likely exists
+// We only ever show what actually streams with Italian audio, so the filter is
+// the source's own Italian catalogue — not a guess. Loaded once per session
+// (see loadItalianCatalog) and cached for the day.
+const italianCatalog = { movie: null, tv: null };
+
+export async function loadItalianCatalog() {
+  const [movie, tv] = await Promise.all([
+    fetchItalianCatalog('movie'),
+    fetchItalianCatalog('tv'),
+  ]);
+  italianCatalog.movie = movie;
+  italianCatalog.tv = tv;
+}
+
+// Fallback for the rare case the catalogue can't be loaded: better a page with
+// a few untranslated titles than an empty one.
+function probablyItalian(item) {
+  if (item.original_language === 'it' || item.original_language === 'en') return true;
   const title = (item.title || item.name || '');
   const originalTitle = (item.original_title || item.original_name || '');
   if (title && originalTitle && title !== originalTitle) return true;
-  // Very popular content from any language usually gets Italian dubbing
-  if ((item.vote_count || 0) > 300) return true;
-  return false;
+  return (item.vote_count || 0) > 300;
 }
 
-function filterItalian(items) {
+function hasItalianAvailable(item, fallbackType = 'movie') {
+  const kind = (item.media_type || fallbackType) === 'tv' ? 'tv' : 'movie';
+  const catalog = italianCatalog[kind];
+  if (!catalog) return probablyItalian(item);
+  return catalog.has(item.id);
+}
+
+function filterItalian(items, mediaType = 'movie') {
   if (!items) return [];
-  return items.filter(hasItalianAvailable);
+  return items.filter((item) => hasItalianAvailable(item, mediaType));
 }
 
 // ─── Hero ─────────────────────────────────────────────
@@ -79,7 +166,7 @@ export async function renderHero(type = 'movie') {
     if (!items || items.length === 0) return;
 
     // Pick a random item from top 10 that has a backdrop
-    const candidates = filterItalian(items).filter((i) => i.backdrop_path).slice(0, 10);
+    const candidates = filterItalian(items, type).filter((i) => i.backdrop_path).slice(0, 10);
     const item = candidates[Math.floor(Math.random() * candidates.length)];
     if (!item) return;
 
@@ -135,11 +222,24 @@ export async function renderHero(type = 'movie') {
   }
 }
 
+// Filtering on the Italian catalogue thins a page of TMDB results a lot — for
+// TV roughly two out of three drop out — so rows pull several pages to stay full.
+async function multiPage(fetcher, pages = 2) {
+  const results = await Promise.allSettled(
+    Array.from({ length: pages }, (_, i) => fetcher(i + 1))
+  );
+  const out = [];
+  for (const r of results) {
+    if (r.status === 'fulfilled' && Array.isArray(r.value)) out.push(...r.value);
+  }
+  return out;
+}
+
 // ─── Content Rows ─────────────────────────────────────
 function createRowHTML(title, items, mediaType = 'movie') {
   if (!items || items.length === 0) return '';
 
-  const cards = filterItalian(items)
+  const cards = filterItalian(items, mediaType)
     .filter((item) => item.poster_path)
     .map((item) => {
       const poster = getPosterUrl(item.poster_path);
@@ -151,6 +251,7 @@ function createRowHTML(title, items, mediaType = 'movie') {
       return `
         <div class="card" data-id="${item.id}" data-type="${type}" tabindex="0">
           <img class="card-poster" src="${poster}" alt="${esc(name)}" loading="lazy" />
+          ${watchedBadge(type, item.id)}
           <div class="card-overlay">
             <div class="card-rating">${rating ? `★ ${rating}` : ''}</div>
             <div class="card-title">${esc(name)}</div>
@@ -196,18 +297,22 @@ export async function renderHomePage() {
   const heroPromise = renderHero('movie');
   const dataPromises = Promise.allSettled([
     fetchTrending('movie', 'day'),
-    fetchPopular('movie'),
-    fetchPopular('tv'),
-    fetchTopRated('movie'),
-    ...FEATURED_GENRES.slice(0, 3).map(g => fetchByGenre(g, 'movie')),
+    multiPage((p) => fetchPopular('movie', p), 2),
+    multiPage((p) => fetchPopular('tv', p), 4),
+    multiPage((p) => fetchTopRated('movie', p), 2),
+    ...FEATURED_GENRES.slice(0, 3).map(g => multiPage((p) => fetchByGenre(g, 'movie', p), 2)),
   ]);
 
-  // Fetch continue watching in parallel
+  // Fetch the profile's own rows in parallel with the TMDB ones
   const profile = getCurrentProfile();
   const cwPromise = profile ? getWatchHistory(profile.id).catch(() => []) : Promise.resolve([]);
+  const favPromise = profile ? getFavorites(profile.id).catch(() => []) : Promise.resolve([]);
+  const recentPromise = profile ? getRecentlyWatched(profile.id).catch(() => []) : Promise.resolve([]);
 
   await heroPromise;
-  const [results, cwItems] = await Promise.all([dataPromises, cwPromise]);
+  const [results, cwItems, favItems, recentItems] = await Promise.all([
+    dataPromises, cwPromise, favPromise, recentPromise,
+  ]);
 
   const labels = [
     'Trending Oggi',
@@ -222,10 +327,24 @@ export async function renderHomePage() {
   const globalSeen = new Set();
   const rows = [];
 
-  // "Continua a guardare" row first
-  if (cwItems && cwItems.length > 0) {
-    rows.push(createContinueWatchingRow(cwItems));
+  // "Continua a guardare" row first, then the profile's own rows
+  const cwResolved = await resolveContinueWatching(cwItems);
+  if (cwResolved.length > 0) {
+    rows.push(createContinueWatchingRow(cwResolved));
   }
+
+  const myListRow = createSavedRow('La mia lista', favItems, 'mylist-row', 'fav');
+  if (myListRow) rows.push(myListRow);
+
+  // Anything already in "Continua a guardare" would be redundant here
+  const cwKeys = new Set(cwResolved.map((i) => listKey(i.media_type, i.tmdb_id)));
+  const recentRow = createSavedRow(
+    'Guardati di recente',
+    (recentItems || []).filter((i) => !cwKeys.has(listKey(i.media_type, i.tmdb_id))),
+    'recent-row',
+    'recent'
+  );
+  if (recentRow) rows.push(recentRow);
 
   results.forEach((r, i) => {
     if (r.status === 'fulfilled' && r.value?.length) {
@@ -247,39 +366,224 @@ export async function renderHomePage() {
   observeFadeIns();
 }
 
+// One card for a row or grid built from our own DB rows. `removeKind` adds the
+// X: 'fav' takes it out of the list, 'recent' hides it from the history.
+function savedCardHTML(item, removeKind) {
+  const removeLabel = removeKind === 'fav' ? 'Rimuovi dalla mia lista' : 'Togli dai guardati di recente';
+  const removeBtn = removeKind ? `
+    <button class="saved-remove-btn" aria-label="${removeLabel}" title="${removeLabel}"
+            data-remove-kind="${removeKind}" data-tmdb="${item.tmdb_id}" data-type="${item.media_type}">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  ` : '';
+
+  return `
+    <div class="card saved-card" data-id="${item.tmdb_id}" data-type="${item.media_type}" tabindex="0">
+      <img class="card-poster" src="${getPosterUrl(item.poster_path)}" alt="${esc(item.title)}" loading="lazy" />
+      ${watchedBadge(item.media_type, item.tmdb_id)}
+      ${removeBtn}
+      <div class="card-overlay">
+        <div class="card-title">${esc(item.title)}</div>
+        <div class="card-info">${item.media_type === 'tv' ? 'Serie TV' : 'Film'}</div>
+      </div>
+    </div>
+  `;
+}
+
+async function handleSavedRemove(btn, card) {
+  const profile = getCurrentProfile();
+  if (!profile) return;
+
+  const tmdbId = parseInt(btn.dataset.tmdb);
+  const mediaType = btn.dataset.type;
+  const kind = btn.dataset.removeKind;
+
+  card.style.transition = 'opacity 0.3s, transform 0.3s';
+  card.style.opacity = '0';
+  card.style.transform = 'scale(0.9)';
+
+  if (kind === 'fav') {
+    favoriteKeys.delete(listKey(mediaType, tmdbId));
+    await toggleFavorite(profile.id, tmdbId, mediaType);
+  } else {
+    await hideFromRecentlyWatched(profile.id, tmdbId, mediaType);
+  }
+
+  setTimeout(() => {
+    const row = card.closest('.content-row');
+    const section = card.closest('.genre-grid-section');
+    card.remove();
+    // An emptied row disappears with its title
+    if (row && row.querySelectorAll('.card').length === 0) row.remove();
+    if (section && section.id === 'recent-section' && section.querySelectorAll('.card').length === 0) section.remove();
+  }, 300);
+}
+
+// ─── My list button (detail modal) ────────────────────
+function favButtonHTML(type, id) {
+  const active = isFavorite(type, id);
+  return `
+    <button class="btn btn-mylist${active ? ' is-fav' : ''}" id="modal-fav-btn"
+            data-type="${type}" data-id="${id}"
+            aria-pressed="${active}"
+            title="${active ? 'Rimuovi dalla mia lista' : 'Aggiungi alla mia lista'}">
+      ${favButtonInner(active)}
+    </button>
+  `;
+}
+
+function favButtonInner(active) {
+  const icon = active
+    ? '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+    : '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+  return `${icon}<span>${active ? 'Nella lista' : 'La mia lista'}</span>`;
+}
+
+let favListDirty = false;   // a toggle happened → refresh the list row on close
+
+async function handleFavToggle(btn) {
+  const profile = getCurrentProfile();
+  if (!profile) return;
+  favListDirty = true;
+
+  const type = btn.dataset.type;
+  const id = parseInt(btn.dataset.id);
+  const wasFav = isFavorite(type, id);
+
+  // Optimistic: the button reacts instantly, the DB call confirms
+  setFavButtonState(btn, !wasFav);
+  favoriteKeys[wasFav ? 'delete' : 'add'](listKey(type, id));
+
+  const now = await toggleFavorite(
+    profile.id, id, type,
+    currentModalDetail?.title || '',
+    currentModalDetail?.posterPath || null
+  );
+
+  if (now === null) {              // request failed → roll back
+    setFavButtonState(btn, wasFav);
+    favoriteKeys[wasFav ? 'add' : 'delete'](listKey(type, id));
+    return;
+  }
+  if (now !== !wasFav) {           // server disagreed → follow the server
+    setFavButtonState(btn, now);
+    favoriteKeys[now ? 'add' : 'delete'](listKey(type, id));
+  }
+}
+
+function setFavButtonState(btn, active) {
+  btn.classList.toggle('is-fav', active);
+  btn.setAttribute('aria-pressed', String(active));
+  btn.title = active ? 'Rimuovi dalla mia lista' : 'Aggiungi alla mia lista';
+  btn.innerHTML = favButtonInner(active);
+}
+
+// ─── Saved rows (favourites / recently watched) ───────
+// These rows are built from our own DB rows, which carry no TMDB metadata —
+// so no Italian-availability filter and no rating/year overlay.
+function createSavedRow(rowTitle, items, rowClass, removeKind) {
+  const cards = (items || [])
+    .filter((item) => item.poster_path)
+    .map((item) => savedCardHTML(item, removeKind)).join('');
+
+  if (!cards) return '';
+
+  return `
+    <div class="content-row ${rowClass} fade-in">
+      <h2 class="row-title">${esc(rowTitle)}</h2>
+      <div class="row-slider-wrap">
+        <button class="row-arrow row-arrow-left" aria-label="Scorri a sinistra">‹</button>
+        <div class="row-slider">${cards}</div>
+        <button class="row-arrow row-arrow-right" aria-label="Scorri a destra">›</button>
+      </div>
+    </div>
+  `;
+}
+
 // ─── Continue Watching Row ────────────────────────────
+
+// The DB returns the last row we touched for each title. For a series that is
+// the last episode *watched* — which may well be finished — so before rendering
+// we resolve the episode the user should actually play next, and drop the shows
+// that have nothing left.
+async function findNextEpisode(tvId, season, episode) {
+  try {
+    const seasonData = await fetchSeasonDetails(tvId, season);
+    const totalEps = seasonData?.episodes?.length || 0;
+    if (episode < totalEps) return { season, episode: episode + 1 };
+
+    const tv = await fetchTVDetails(tvId);
+    const nextSeason = season + 1;
+    if (tv.seasons?.some((s) => s.season_number === nextSeason && s.episode_count > 0)) {
+      return { season: nextSeason, episode: 1 };
+    }
+  } catch (e) { /* TMDB unreachable → treat as "no next episode" */ }
+  return null;
+}
+
+async function resolveContinueWatching(items) {
+  const resolved = await Promise.all((items || []).map(async (item) => {
+    const base = {
+      ...item,
+      playSeason: item.season || null,
+      playEpisode: item.episode || null,
+      startTime: item.completed ? 0 : (item.progress_seconds || 0),
+      isNextEpisode: false,
+    };
+
+    // Movies arrive already filtered server-side; only a finished episode
+    // needs resolving.
+    if (item.media_type !== 'tv' || !item.completed || !item.season || !item.episode) return base;
+
+    const next = await findNextEpisode(item.tmdb_id, item.season, item.episode);
+    if (!next) return null;   // series is over — nothing left to continue
+    return {
+      ...base,
+      playSeason: next.season,
+      playEpisode: next.episode,
+      startTime: 0,
+      isNextEpisode: true,
+    };
+  }));
+
+  return resolved.filter(Boolean);
+}
+
 function createContinueWatchingRow(items) {
   const cards = items.map(item => {
     const poster = getPosterUrl(item.poster_path);
-    const progress = item.duration_seconds > 0
-      ? Math.min(Math.round((item.progress_seconds / item.duration_seconds) * 100), 99)
+    const progress = (!item.isNextEpisode && item.duration_seconds > 0)
+      ? Math.min(Math.round((item.startTime / item.duration_seconds) * 100), 99)
       : 0;
     const remaining = item.duration_seconds > 0
-      ? Math.max(0, Math.round((item.duration_seconds - item.progress_seconds) / 60))
+      ? Math.max(0, Math.round((item.duration_seconds - item.startTime) / 60))
       : 0;
-    const subtitle = item.media_type === 'tv' && item.season
-      ? `S${item.season}:E${item.episode}`
+    const subtitle = item.media_type === 'tv' && item.playSeason
+      ? `S${item.playSeason}:E${item.playEpisode}`
       : '';
+    const timeLabel = item.isNextEpisode
+      ? 'Prossimo episodio'
+      : (progress > 0 ? `${remaining} min rimasti` : 'Riprendi');
 
     return `
       <div class="card cw-card" data-id="${item.tmdb_id}" data-type="${item.media_type}"
-           data-season="${item.season || ''}" data-episode="${item.episode || ''}"
+           data-season="${item.playSeason || ''}" data-episode="${item.playEpisode || ''}"
            data-title="${esc(item.title)}" data-poster="${esc(item.poster_path || '')}"
-           data-progress="${item.progress_seconds || 0}"
+           data-progress="${item.startTime || 0}"
            tabindex="0">
         <img class="card-poster" src="${poster}" alt="${esc(item.title)}" loading="lazy" />
         <div class="cw-overlay">
           <button class="cw-play-btn" aria-label="Riproduci">
             <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
           </button>
-          <button class="cw-remove-btn" aria-label="Rimuovi" data-tmdb="${item.tmdb_id}" data-type="${item.media_type}" data-season="${item.season || ''}" data-episode="${item.episode || ''}">
+          <button class="cw-remove-btn" aria-label="Rimuovi" data-tmdb="${item.tmdb_id}" data-type="${item.media_type}">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
         <div class="cw-info">
           <div class="cw-title">${esc(item.title)}</div>
           ${subtitle ? `<div class="cw-subtitle">${subtitle}</div>` : ''}
-          <div class="cw-time">${remaining} min rimasti</div>
+          <div class="cw-time">${timeLabel}</div>
         </div>
         <div class="cw-progress-bar">
           <div class="cw-progress-fill" style="width: ${progress}%"></div>
@@ -308,15 +612,14 @@ async function handleCwRemove(removeBtn, card) {
 
   const tmdbId = parseInt(removeBtn.dataset.tmdb);
   const mediaType = removeBtn.dataset.type;
-  const season = removeBtn.dataset.season ? parseInt(removeBtn.dataset.season) : null;
-  const episode = removeBtn.dataset.episode ? parseInt(removeBtn.dataset.episode) : null;
 
   // Animate removal
   card.style.transition = 'opacity 0.3s, transform 0.3s';
   card.style.opacity = '0';
   card.style.transform = 'scale(0.9)';
 
-  await markWatchCompleted(profile.id, tmdbId, mediaType, season, episode);
+  // Hide the whole title, not just this episode — progress rows stay intact
+  await dismissFromContinueWatching(profile.id, tmdbId, mediaType);
 
   setTimeout(() => {
     card.remove();
@@ -325,6 +628,126 @@ async function handleCwRemove(removeBtn, card) {
       cwRow.remove();
     }
   }, 300);
+}
+
+// ─── "La mia lista" page ──────────────────────────────
+function savedGridHTML(items, removeKind) {
+  return (items || [])
+    .filter((item) => item.poster_path)
+    .map((item) => savedCardHTML(item, removeKind)).join('');
+}
+
+export async function renderMyListPage() {
+  currentPage = 'mylist';
+  activeGenreFilter = null;
+  heroSection.classList.add('hidden');
+
+  const profile = getCurrentProfile();
+  // No filter bar here, so the page carries the navbar offset itself
+  contentRows.innerHTML = `
+    <div class="mylist-page">
+      <div class="genre-grid-section fade-in visible">
+        <h2 class="genre-grid-title">La mia lista</h2>
+        <div class="genre-results-grid" id="mylist-grid">
+          ${Array(12).fill('<div class="skeleton skeleton-poster" style="width:100%;aspect-ratio:2/3"></div>').join('')}
+        </div>
+      </div>
+      <div class="genre-grid-section fade-in visible" id="recent-section" style="margin-top:36px">
+        <h2 class="genre-grid-title">Guardati di recente</h2>
+        <div class="genre-results-grid" id="recent-grid"></div>
+      </div>
+    </div>
+  `;
+
+  if (!profile) return;
+
+  const [favItems, recentItems] = await Promise.all([
+    getFavorites(profile.id).catch(() => []),
+    getRecentlyWatched(profile.id).catch(() => []),
+  ]);
+
+  const favGrid = $('#mylist-grid');
+  if (favGrid) {
+    favGrid.innerHTML = favItems.length
+      ? savedGridHTML(favItems, 'fav')
+      : `<div class="no-results" style="grid-column:1/-1">
+           <div class="no-results-icon">🔖</div>
+           <p class="no-results-text">La tua lista è vuota. Apri un titolo e tocca “La mia lista” per salvarlo qui.</p>
+         </div>`;
+  }
+
+  const recentSection = $('#recent-section');
+  const recentGrid = $('#recent-grid');
+  if (recentGrid) {
+    if (recentItems.length) {
+      recentGrid.innerHTML = savedGridHTML(recentItems, 'recent');
+    } else if (recentSection) {
+      recentSection.remove();
+    }
+  }
+
+  observeFadeIns();
+}
+
+// Finishing something should land it in "Guardati di recente" right away
+async function refreshRecentRow() {
+  const profile = getCurrentProfile();
+  if (!profile || currentPage !== 'home') return;
+
+  const [recentItems, cwItems] = await Promise.all([
+    getRecentlyWatched(profile.id).catch(() => null),
+    getWatchHistory(profile.id).catch(() => []),
+  ]);
+  if (!recentItems) return;
+
+  const cwKeys = new Set((cwItems || []).map((i) => listKey(i.media_type, i.tmdb_id)));
+  const rowHTML = createSavedRow(
+    'Guardati di recente',
+    recentItems.filter((i) => !cwKeys.has(listKey(i.media_type, i.tmdb_id))),
+    'recent-row',
+    'recent'
+  );
+  const existing = document.querySelector('.recent-row');
+
+  if (rowHTML) {
+    if (existing) {
+      existing.outerHTML = rowHTML;
+    } else {
+      const anchorRow = document.querySelector('.mylist-row') || document.querySelector('.cw-row');
+      if (anchorRow) anchorRow.insertAdjacentHTML('afterend', rowHTML);
+      else contentRows.insertAdjacentHTML('afterbegin', rowHTML);
+    }
+    attachRowArrows();
+    observeFadeIns();
+  } else if (existing) {
+    existing.remove();
+  }
+}
+
+// Keep the home "La mia lista" row in sync after a toggle in the modal
+async function refreshMyListRow() {
+  const profile = getCurrentProfile();
+  if (!profile || currentPage !== 'home') return;
+
+  const favItems = await getFavorites(profile.id).catch(() => null);
+  if (!favItems) return;
+
+  const rowHTML = createSavedRow('La mia lista', favItems, 'mylist-row', 'fav');
+  const existing = document.querySelector('.mylist-row');
+
+  if (rowHTML) {
+    if (existing) {
+      existing.outerHTML = rowHTML;
+    } else {
+      const cwRow = document.querySelector('.cw-row');
+      if (cwRow) cwRow.insertAdjacentHTML('afterend', rowHTML);
+      else contentRows.insertAdjacentHTML('afterbegin', rowHTML);
+    }
+    attachRowArrows();
+    observeFadeIns();
+  } else if (existing) {
+    existing.remove();
+  }
 }
 
 // ─── Filter Bar (Genres + Companies) ──────────────────
@@ -562,7 +985,7 @@ async function renderGenreGrid(genreId, mediaType) {
 
 // Helper: render card HTML for a list of items (pre-filtered for Italian)
 function renderCardGrid(items, mediaType) {
-  return filterItalian(items)
+  return filterItalian(items, mediaType)
     .map((item) => {
       const poster = getPosterUrl(item.poster_path);
       const name = item.title || item.name || 'Senza titolo';
@@ -572,6 +995,7 @@ function renderCardGrid(items, mediaType) {
       return `
         <div class="card" data-id="${item.id}" data-type="${mediaType}" tabindex="0">
           <img class="card-poster" src="${poster}" alt="${esc(name)}" loading="lazy" />
+          ${watchedBadge(mediaType, item.id)}
           <div class="card-overlay">
             <div class="card-rating">${rating ? `★ ${rating}` : ''}</div>
             <div class="card-title">${esc(name)}</div>
@@ -967,12 +1391,12 @@ async function renderMoviesAllRows() {
 
   // All rows fetched in parallel — the page renders in one network round-trip
   const sources = [
-    { label: 'Popolari', fetch: () => fetchPopular('movie') },
-    { label: 'I Più Votati', fetch: () => fetchTopRated('movie') },
+    { label: 'Popolari', fetch: () => multiPage((p) => fetchPopular('movie', p), 2) },
+    { label: 'I Più Votati', fetch: () => multiPage((p) => fetchTopRated('movie', p), 2) },
     { label: 'Trending Questa Settimana', fetch: () => fetchTrending('movie', 'week') },
     ...FEATURED_GENRES.map(genreId => ({
       label: GENRES_MAP[genreId],
-      fetch: () => fetchByGenre(genreId, 'movie'),
+      fetch: () => multiPage((p) => fetchByGenre(genreId, 'movie', p), 2),
     })),
   ];
 
@@ -1038,12 +1462,12 @@ async function renderTVAllRows() {
 
   // All rows fetched in parallel — the page renders in one network round-trip
   const sources = [
-    { label: 'Popolari', fetch: () => fetchPopular('tv') },
-    { label: 'Le Più Votate', fetch: () => fetchTopRated('tv') },
+    { label: 'Popolari', fetch: () => multiPage((p) => fetchPopular('tv', p), 4) },
+    { label: 'Le Più Votate', fetch: () => multiPage((p) => fetchTopRated('tv', p), 4) },
     { label: 'Trending', fetch: () => fetchTrending('tv', 'week') },
     ...[18, 35, 10765, 80, 10759].map(genreId => ({
       label: TV_GENRES_MAP[genreId] || GENRES_MAP[genreId] || 'Genere',
-      fetch: () => fetchByGenre(genreId, 'tv'),
+      fetch: () => multiPage((p) => fetchByGenre(genreId, 'tv', p), 4),
     })),
   ];
 
@@ -1160,6 +1584,7 @@ async function performSearch(query) {
         return `
           <div class="card" data-id="${item.id}" data-type="${type}" tabindex="0">
             <img class="card-poster" src="${poster}" alt="${esc(name)}" loading="lazy" />
+            ${watchedBadge(type, item.id)}
             <div class="card-overlay">
               <div class="card-rating">${rating ? `★ ${rating}` : ''}</div>
               <div class="card-title">${esc(name)}</div>
@@ -1210,11 +1635,13 @@ function buildRelated(detail, type, limit = 12) {
     ...(detail.similar?.results || []),
   ];
 
-  // De-duplicate, drop the title itself and anything without a poster
+  // De-duplicate, drop the title itself, anything without a poster, and
+  // anything the source doesn't stream in Italian
   const seen = new Set([detail.id]);
   const unique = [];
   for (const r of pool) {
     if (seen.has(r.id) || !r.poster_path) continue;
+    if (!hasItalianAvailable(r, type)) continue;
     seen.add(r.id);
     unique.push(r);
   }
@@ -1302,6 +1729,7 @@ export async function openDetail(id, type = 'movie') {
             Trailer ${trailerLang}
           </button>
           ` : ''}
+          ${favButtonHTML(type, id)}
         </div>
       `;
     }
@@ -1481,6 +1909,7 @@ export async function openDetail(id, type = 'movie') {
               return `
                 <div class="card" data-id="${item.id}" data-type="${type}" tabindex="0">
                   <img class="card-poster" src="${p}" alt="${esc(n)}" loading="lazy" />
+                  ${watchedBadge(type, item.id)}
                   <div class="card-overlay">
                     <div class="card-title">${esc(n)}</div>
                   </div>
@@ -1512,6 +1941,10 @@ export async function openDetail(id, type = 'movie') {
         }
       });
     }
+
+    // Flag titles the streaming source simply doesn't carry, before the user
+    // hits play and lands on a bare 404
+    markModalAvailability(type, id);
 
     // Trailer button events
     const trailerBtn = $('#modal-trailer-btn');
@@ -1631,6 +2064,23 @@ async function loadEpisodes(tvId, seasonNumber) {
       })
       .join('');
 
+    // Mark the episodes the source doesn't carry (yet). Best effort: if the
+    // catalogue is unreachable the grid is left untouched.
+    fetchSourceAvailability('tv', tvId, true).then((info) => {
+      // Only meaningful when the show is listed with Italian episodes; otherwise
+      // an "unavailable" tag would be wrong for shows carried in original audio.
+      if (!info || !info.available || !info.italian) return;
+      const eps = info.episodes;
+      if (!eps || eps.size === 0) return;
+      if (!currentModal || Number(currentModal.id) !== Number(tvId)) return;
+      $$('.episode-card').forEach((card) => {
+        if (Number(card.dataset.season) !== Number(seasonNumber)) return;
+        if (eps.has(`${Number(seasonNumber)}-${Number(card.dataset.episode)}`)) return;
+        card.classList.add('episode-unavailable');
+        card.insertAdjacentHTML('beforeend', '<div class="episode-unavailable-label">Non ancora disponibile</div>');
+      });
+    }).catch(() => {});
+
     // Episode click events — read progress from data attributes (updated by refreshModalProgress)
     const _tvTitle = currentModalDetail?.title || '';
     const _tvPoster = currentModalDetail?.posterPath || '';
@@ -1646,6 +2096,126 @@ async function loadEpisodes(tvId, seasonNumber) {
     console.error('Episode load error:', err);
     grid.innerHTML = '<p style="color:var(--text-muted)">Errore nel caricamento episodi.</p>';
   }
+}
+
+// Detail modal: tell the user up front what the source has for this title —
+// nothing at all, or no Italian track. Neither is the user's fault.
+async function markModalAvailability(type, id) {
+  const info = await fetchSourceAvailability(type, id).catch(() => null);
+  if (!info) return;                                      // unknown → stay quiet
+  if (!currentModal || currentModal.id !== id) return;     // modal already moved on
+  if (info.available && info.italian) return;              // nothing to say
+
+  if (!info.available) {
+    const playBtn = $('#modal-play-btn');
+    if (playBtn) {
+      playBtn.classList.add('btn-unavailable');
+      playBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.9" y1="4.9" x2="19.1" y2="19.1"/></svg>
+        Non disponibile
+      `;
+    }
+  }
+
+  const slot = $('#modal-progress-bar');
+  if (!slot || document.querySelector('.source-warning')) return;
+
+  const html = info.available
+    ? `
+      <div class="source-warning source-warning-soft">
+        <span class="source-warning-icon">🔊</span>
+        <span>
+          <strong>Probabilmente solo in lingua originale.</strong>
+          La sorgente ha questo titolo ma non risulta una traccia audio italiana.
+          Puoi comunque avviarlo: se l’italiano c’è, il player lo propone tra le lingue.
+        </span>
+      </div>`
+    : `
+      <div class="source-warning">
+        <span class="source-warning-icon">🚫</span>
+        <span>
+          <strong>Non c’è nel catalogo dello streaming.</strong>
+          Non è un problema del tuo account o del dispositivo: la sorgente non ha proprio questo titolo.
+          Capita con programmi TV, varietà, quiz e talk (Rai, Mediaset, Sky), mentre film e fiction di solito ci sono.
+          Il trailer e la scheda restano consultabili.
+        </span>
+      </div>`;
+
+  slot.insertAdjacentHTML('beforebegin', html);
+}
+
+// ─── Source availability ──────────────────────────────
+// The player is an iframe on vixsrc: when a title isn't in their catalogue it
+// renders its own bare "404" and we can't read it (cross-origin). So we check
+// the catalogue ourselves and say what actually went wrong.
+
+// Resolves to one of: 'ok' | 'offline' | 'no-title' | 'no-episode' | 'unknown'
+async function checkAvailability(type, id, season, episode) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'offline';
+
+  const wantEpisodes = type === 'tv' && !!season && !!episode;
+  const info = await fetchSourceAvailability(type, id, wantEpisodes);
+  if (!info) return 'unknown';                 // catalogue unreachable
+  if (!info.available) return 'no-title';
+
+  // An episode missing from the Italian list can still exist in the original
+  // language, so only flag it when the show itself has Italian episodes listed.
+  if (wantEpisodes && info.italian && info.episodes && info.episodes.size > 0
+      && !info.episodes.has(`${parseInt(season)}-${parseInt(episode)}`)) {
+    return 'no-episode';
+  }
+  return 'ok';
+}
+
+const AVAILABILITY_COPY = {
+  offline: {
+    icon: '📡',
+    title: 'Sei offline',
+    text: 'Il dispositivo non è connesso a internet. Ricontrolla la connessione e riprova.',
+  },
+  'no-title': {
+    icon: '🚫',
+    title: 'Non disponibile nel catalogo',
+    text: 'Questo titolo esiste su TMDB ma la sorgente di streaming non ce l’ha — è il suo “404”, non un problema del tuo account o del dispositivo. Succede con programmi TV, varietà, quiz e talk di Rai, Mediaset e Sky; film e fiction di solito ci sono.',
+  },
+  'no-episode': {
+    icon: '📺',
+    title: 'Episodio non ancora disponibile',
+    text: 'La serie c’è, ma questo episodio non è ancora stato caricato dalla sorgente. Di solito arriva qualche giorno dopo la messa in onda: prova un altro episodio o riprova più avanti.',
+  },
+  unknown: {
+    icon: '⚠️',
+    title: 'Sorgente non raggiungibile',
+    text: 'Non è stato possibile contattare la sorgente di streaming per capire se il titolo è disponibile. Può essere un blocco temporaneo di rete (DNS del provider, VPN o ad blocker).',
+  },
+};
+
+function showPlayerError(kind) {
+  if (!playerOverlay) return;
+  const copy = AVAILABILITY_COPY[kind];
+  if (!copy) return;
+
+  const loader = playerOverlay.querySelector('.cinema-loader');
+  if (loader) loader.style.display = 'none';
+  playerOverlay.querySelector('.cinema-error')?.remove();
+
+  const box = document.createElement('div');
+  box.className = 'cinema-error';
+  box.innerHTML = `
+    <div class="cinema-error-inner">
+      <div class="cinema-error-icon">${copy.icon}</div>
+      <h3 class="cinema-error-title">${copy.title}</h3>
+      <p class="cinema-error-text">${copy.text}</p>
+      <div class="cinema-error-actions">
+        <button class="btn btn-play cinema-error-close">Chiudi</button>
+        <button class="btn btn-info cinema-error-try">Prova comunque</button>
+      </div>
+    </div>
+  `;
+  playerOverlay.appendChild(box);
+
+  box.querySelector('.cinema-error-close')?.addEventListener('click', () => history.back());
+  box.querySelector('.cinema-error-try')?.addEventListener('click', () => box.remove());
 }
 
 // ─── Player ───────────────────────────────────────────
@@ -1881,7 +2451,27 @@ export function openPlayer(type, id, season, episode, title, posterPath, startTi
     }).catch(() => {});
   }
 
+  // Tell the user what's wrong instead of leaving them on vixsrc's bare 404
+  checkAvailability(type, id, season, episode)
+    .then((verdict) => {
+      // Only if this player is still the one on screen
+      if (playerOverlay !== overlay) return;
+      if (verdict !== 'ok' && verdict !== 'unknown') showPlayerError(verdict);
+    })
+    .catch(() => {});
+
   requestAnimationFrame(() => overlay.classList.add('cinema-active'));
+}
+
+// Same rule as the DB's is_watch_finished(): end credits count as finished, so
+// a film with 7 minutes of credits left doesn't come back as "continue".
+// 8% of the runtime, never under 2 minutes, never over 10.
+function finishedThreshold(duration) {
+  return Math.max(120, Math.min(duration * 0.08, 600));
+}
+
+function isNearEnd(currentTime, duration) {
+  return duration > 0 && (duration - currentTime) <= finishedThreshold(duration);
 }
 
 function savePlayerProgress(completed) {
@@ -1889,8 +2479,8 @@ function savePlayerProgress(completed) {
   if (!profile || !playerTrackingData) return;
   const d = playerTrackingData;
 
-  // Completed if: explicitly marked, video ended, or within 2 minutes of end
-  const isCompleted = completed || (d.duration > 0 && (d.duration - d.currentTime) <= 120);
+  // Completed if: explicitly marked, video ended, or into the end credits
+  const isCompleted = completed || isNearEnd(d.currentTime, d.duration);
 
   // Always save full progress data (time + completed flag)
   saveWatchProgress({
@@ -1944,7 +2534,7 @@ function readLivePosition(profileId, type, id, season, episode) {
     const raw = localStorage.getItem(posKey(profileId, type, id, season, episode));
     if (!raw) return 0;
     const o = JSON.parse(raw);
-    if (o.d > 0 && (o.d - o.t) <= 120) return 0;   // basically finished
+    if (isNearEnd(o.t, o.d)) return 0;   // basically finished
     return o.t > 30 ? o.t : 0;
   } catch (e) { return 0; }
 }
@@ -1996,10 +2586,18 @@ export function closePlayer(goBack = true) {
   setTimeout(() => el.remove(), 400);
   if (goBack && history.state?.cinema) history.back();
 
-  // Auto-refresh the "Continue Watching" row after a short delay
+  // Auto-refresh the profile's own rows after a short delay
   if (currentPage === 'home') {
-    setTimeout(() => refreshContinueWatching(), 600);
+    setTimeout(() => {
+      refreshContinueWatching();
+      refreshRecentRow();
+    }, 600);
+  } else if (currentPage === 'mylist') {
+    setTimeout(() => renderMyListPage(), 600);
   }
+
+  // Finishing something may have earned a green check
+  setTimeout(() => refreshWatchedBadges(), 600);
 
   // Auto-refresh the modal progress bar if modal is open
   if (modalOverlay.classList.contains('active')) {
@@ -2097,7 +2695,7 @@ async function refreshContinueWatching() {
   if (!profile) return;
 
   try {
-    const cwItems = await getWatchHistory(profile.id);
+    const cwItems = await resolveContinueWatching(await getWatchHistory(profile.id));
     const existingRow = document.querySelector('.cw-row');
 
     if (cwItems && cwItems.length > 0) {
@@ -2141,6 +2739,13 @@ export function closeModal() {
     modalBackdropWrap.innerHTML = '';
     modalBody.innerHTML = '';
   }, 300);
+
+  // A "La mia lista" toggle inside the modal must show up behind it
+  if (favListDirty) {
+    favListDirty = false;
+    if (currentPage === 'mylist') renderMyListPage();
+    else refreshMyListRow();
+  }
 }
 
 // Escape closes (in priority order): cinema player → modal → search
@@ -2183,6 +2788,22 @@ document.addEventListener('click', (e) => {
   if (cwRemove) {
     const card = cwRemove.closest('.cw-card');
     if (card) handleCwRemove(cwRemove, card);
+    return;
+  }
+
+  // X on a "La mia lista" / "Guardati di recente" card
+  const savedRemove = e.target.closest('.saved-remove-btn');
+  if (savedRemove) {
+    e.stopPropagation();
+    const card = savedRemove.closest('.saved-card');
+    if (card) handleSavedRemove(savedRemove, card);
+    return;
+  }
+
+  // "La mia lista" toggle in the detail modal
+  const favBtn = e.target.closest('.btn-mylist');
+  if (favBtn) {
+    handleFavToggle(favBtn);
     return;
   }
 
@@ -2367,6 +2988,9 @@ async function restoreBase(page, f) {
     } else {
       await renderTVPage();
     }
+  } else if (page === 'mylist') {
+    activeGenreFilter = null;
+    await renderMyListPage();
   } else {
     activeGenreFilter = null;
     await renderHomePage();
@@ -2501,6 +3125,9 @@ async function navigateTo(page) {
       break;
     case 'tv':
       await renderTVPage();
+      break;
+    case 'mylist':
+      await renderMyListPage();
       break;
   }
   writeRoute();

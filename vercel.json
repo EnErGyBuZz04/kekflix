@@ -1,7 +1,8 @@
 {
   "headers": [
     {
-      "source": "/(.*)",
+      "//": "Everything but /api: the functions set their own cache headers and must keep them",
+      "source": "/((?!api/).*)",
       "headers": [
         { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" },
         { "key": "Pragma", "value": "no-cache" },

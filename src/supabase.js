@@ -134,6 +134,37 @@ export async function markWatchCompleted(profileId, tmdbId, mediaType, season = 
 }
 
 /**
+ * Hide a whole title from "Continua a guardare" (the X on the card).
+ * Progress rows stay in the DB, so the progress bars keep working.
+ */
+export async function dismissFromContinueWatching(profileId, tmdbId, mediaType) {
+  const { error } = await supabase.rpc('dismiss_from_continue_watching', {
+    p_profile_id: profileId,
+    p_tmdb_id: tmdbId,
+    p_media_type: mediaType,
+  });
+
+  if (error) {
+    console.error('Dismiss from continue watching error:', error);
+  }
+}
+
+/**
+ * Hide a title from "Guardati di recente" (the X on the card)
+ */
+export async function hideFromRecentlyWatched(profileId, tmdbId, mediaType) {
+  const { error } = await supabase.rpc('hide_from_recently_watched', {
+    p_profile_id: profileId,
+    p_tmdb_id: tmdbId,
+    p_media_type: mediaType,
+  });
+
+  if (error) {
+    console.error('Hide from recently watched error:', error);
+  }
+}
+
+/**
  * Get all episode progress for a specific show/movie (for modal progress bars)
  */
 export async function getEpisodeProgress(profileId, tmdbId) {
@@ -144,6 +175,64 @@ export async function getEpisodeProgress(profileId, tmdbId) {
 
   if (error) {
     console.error('Get episode progress error:', error);
+    return [];
+  }
+  return data || [];
+}
+
+// ─── Favorites / Recently watched ─────────────────────
+
+/**
+ * Add or remove a title from the profile's list. Resolves to the new state
+ * (true = now a favorite).
+ */
+export async function toggleFavorite(profileId, tmdbId, mediaType, title = '', posterPath = null) {
+  const { data, error } = await supabase.rpc('toggle_favorite', {
+    p_profile_id: profileId,
+    p_tmdb_id: tmdbId,
+    p_media_type: mediaType,
+    p_title: title,
+    p_poster_path: posterPath,
+  });
+
+  if (error) {
+    console.error('Toggle favorite error:', error);
+    return null;
+  }
+  return data === true;
+}
+
+/**
+ * The profile's list, newest first
+ */
+export async function getFavorites(profileId) {
+  const { data, error } = await supabase.rpc('get_favorites', { p_profile_id: profileId });
+  if (error) {
+    console.error('Get favorites error:', error);
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * Titles watched recently (one row per title), newest first
+ */
+export async function getRecentlyWatched(profileId) {
+  const { data, error } = await supabase.rpc('get_recently_watched', { p_profile_id: profileId });
+  if (error) {
+    console.error('Get recently watched error:', error);
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * Titles fully watched — used for the green check badge on cards
+ */
+export async function getWatchedIds(profileId) {
+  const { data, error } = await supabase.rpc('get_watched_ids', { p_profile_id: profileId });
+  if (error) {
+    console.error('Get watched ids error:', error);
     return [];
   }
   return data || [];
